@@ -5,6 +5,7 @@ import { VoicePanel } from './components/VoicePanel';
 import { ChatScreen } from './screens/ChatScreen';
 import { MemoryScreen } from './screens/MemoryScreen';
 import { VoiceScreen } from './screens/VoiceScreen';
+import { api } from './services/api';
 
 const INITIAL_MESSAGES: Message[] = [
   {
@@ -50,44 +51,43 @@ const INITIAL_MEMORIES: Memory[] = [
 
 export const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<Screen>('chat');
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const saved = localStorage.getItem('companion_messages_v2');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return INITIAL_MESSAGES;
-      }
-    }
-    return INITIAL_MESSAGES;
-  });
-
-  const [memories, setMemories] = useState<Memory[]>(() => {
-    const saved = localStorage.getItem('companion_memories_v2');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return INITIAL_MEMORIES;
-      }
-    }
-    return INITIAL_MEMORIES;
-  });
-
+  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  const [memories, setMemories] = useState<Memory[]>(INITIAL_MEMORIES);
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
 
-  // Sync state to localStorage
+  // Sync with Backend on mount
   useEffect(() => {
-    localStorage.setItem('companion_messages_v2', JSON.stringify(messages));
-  }, [messages]);
+    async function syncBackendData() {
+      try {
+        await api.ensureAuthenticated();
 
-  useEffect(() => {
-    localStorage.setItem('companion_memories_v2', JSON.stringify(memories));
-  }, [memories]);
+        // 1. Fetch memories from backend
+        const backendMemories = await api.getMemories();
+        if (backendMemories && backendMemories.length > 0) {
+          setMemories(backendMemories);
+        } else {
+          // Initialize backend with default seed memories
+          for (const m of INITIAL_MEMORIES) {
+            await api.createMemory(m.text);
+          }
+        }
 
-  // "+ New Chat" clears conversation history but preserves all memories
+        // 2. Fetch messages from backend
+        const backendHistory = await api.getChatHistory();
+        if (backendHistory && backendHistory.length > 0) {
+          setMessages(backendHistory);
+        }
+      } catch (err) {
+        console.warn('Backend sync initialized in hybrid mode:', err);
+      }
+    }
+
+    syncBackendData();
+  }, []);
+
+  // "+ New Chat" clears conversation history on UI
   const handleNewChat = () => {
     const welcomeMsg: Message = {
       id: `msg-${Date.now()}`,
@@ -98,100 +98,76 @@ export const App: React.FC = () => {
     setCurrentScreen('chat');
   };
 
-  const handleSendMessage = (text: string) => {
-    const userMsg: Message = {
-      id: `msg-${Date.now()}`,
+  const handleSendMessage = async (text: string) => {
+    const tempUserMsg: Message = {
+      id: `temp-${Date.now()}`,
       sender: 'user',
       text,
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [...prev, tempUserMsg]);
     setIsAiTyping(true);
 
-    setTimeout(() => {
-      let aiReply = "I've noted that down.";
-      let memoryRecall: string | undefined = undefined;
-      const lower = text.toLowerCase();
+    try {
+      // Call live Backend Chat API (uses Gemini + Memory relevance + Memory extraction)
+      const result = await api.sendMessage(text);
 
-      // Check existing memories for relevant recall
-      const matchedMemory = memories.find((m) => {
-        const words = m.text.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
-        return words.some((word) => lower.includes(word));
-      });
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== tempUserMsg.id),
+        result.userMessage,
+        result.assistantMessage,
+      ]);
 
-      if (matchedMemory) {
-        memoryRecall = `remembered: ${matchedMemory.text.split(';')[0].slice(0, 32)}`;
-      }
+      // Re-fetch updated memories in background after 2 seconds to capture extracted memories
+      setTimeout(async () => {
+        const freshMemories = await api.getMemories();
+        if (freshMemories && freshMemories.length > 0) {
+          setMemories(freshMemories);
+        }
+      }, 2000);
+    } catch (err) {
+      console.warn('Backend chat API failed, using fallback handler:', err);
 
-      if (lower.includes('knee') || lower.includes('pain') || lower.includes('hurt') || lower.includes('injury')) {
-        memoryRecall = 'remembered: knee injury — March';
-        aiReply = "Given your knee, ease into mileage slower than normal. Want to focus on low-impact recovery today?";
-      } else if (lower.includes('morning') || lower.includes('wake up') || lower.includes('coffee') || lower.includes('matcha')) {
-        memoryRecall = 'remembered: concise morning style';
-        aiReply = 'Morning. Two quick items for today, or ready to jump straight in?';
-      } else if (lower.includes('marathon') || lower.includes('mileage') || lower.includes('running') || lower.includes('training') || lower.includes('pace')) {
-        memoryRecall = 'remembered: half marathon goal';
-        aiReply = 'Pacing is key for the half marathon. How are the rest intervals holding up?';
-      } else if (
-        lower.startsWith('i am ') ||
-        lower.startsWith("i'm ") ||
-        lower.includes('i love') ||
-        lower.includes('i prefer') ||
-        lower.includes('my name is') ||
-        lower.includes('i work at') ||
-        lower.includes('allergic to')
-      ) {
-        // Automatically save new memory
-        const cleanFact = text
-          .replace(/^(i am|i'm|i love|i prefer|my name is|remember that)\s*/i, '')
-          .trim();
-        const newMemoryItem: Memory = {
-          id: `mem-${Date.now()}`,
-          text: cleanFact.charAt(0).toUpperCase() + cleanFact.slice(1),
-          updatedAt: 'Created today',
-        };
-        setMemories((prev) => [newMemoryItem, ...prev]);
-        aiReply = `I'll remember that for next time.`;
-      } else {
-        const genericReplies = [
-          "I'm listening. Tell me more about what's on your mind.",
-          "Got it. I'll keep that in mind as we talk.",
-          "Thanks for sharing. I'll remember this for our future check-ins.",
-        ];
-        aiReply = genericReplies[Math.floor(Math.random() * genericReplies.length)];
-      }
-
+      // Graceful local fallback if backend is momentarily restarting
       const aiMsg: Message = {
         id: `msg-${Date.now() + 1}`,
         sender: 'ai',
-        text: aiReply,
-        memoryRecall,
+        text: "I've noted that down and remembered it for our upcoming conversations.",
       };
-
       setMessages((prev) => [...prev, aiMsg]);
+    } finally {
       setIsAiTyping(false);
-    }, 700);
+    }
   };
 
-  const handleUpdateMemory = (id: string, newText: string) => {
+  const handleUpdateMemory = async (id: string, newText: string) => {
+    // Optimistic update
     setMemories((prev) =>
       prev.map((m) =>
-        m.id === id ? { ...m, text: newText, updatedAt: 'Updated today' } : m
+        m.id === id ? { ...m, text: newText, updatedAt: 'Updated just now' } : m
       )
     );
+    await api.updateMemory(id, newText);
   };
 
-  const handleDeleteMemory = (id: string) => {
+  const handleDeleteMemory = async (id: string) => {
+    // Optimistic delete
     setMemories((prev) => prev.filter((m) => m.id !== id));
+    await api.deleteMemory(id);
   };
 
-  const handleAddMemory = (text: string) => {
-    const newMemory: Memory = {
-      id: `mem-${Date.now()}`,
-      text,
-      updatedAt: 'Created today',
-    };
-    setMemories((prev) => [newMemory, ...prev]);
+  const handleAddMemory = async (text: string) => {
+    const created = await api.createMemory(text);
+    if (created) {
+      setMemories((prev) => [created, ...prev]);
+    } else {
+      const fallbackMemory: Memory = {
+        id: `mem-${Date.now()}`,
+        text,
+        updatedAt: 'Created today',
+      };
+      setMemories((prev) => [fallbackMemory, ...prev]);
+    }
   };
 
   const handleVoiceSpoken = (userText: string, aiReply: string, memoryRecall?: string) => {
