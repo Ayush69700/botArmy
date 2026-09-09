@@ -15,7 +15,7 @@ export default function VoiceControls({
 
   const recognitionRef = useRef(null);
   const shouldListenRef = useRef(false);
-  const accumulatedTextRef = useRef('');
+  const liveTranscriptRef = useRef('');
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -27,19 +27,23 @@ export default function VoiceControls({
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
     recognition.lang = 'en-US';
 
     recognition.onresult = (event) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      let finalTranscript = '';
+      let interimTranscript = '';
+      for (let i = 0; i < event.results.length; i++) {
         const item = event.results[i];
         if (item.isFinal) {
-          accumulatedTextRef.current += (accumulatedTextRef.current ? ' ' : '') + item[0].transcript.trim();
+          finalTranscript += item[0].transcript + ' ';
         } else {
-          interim += item[0].transcript;
+          interimTranscript += item[0].transcript;
         }
       }
-      setLiveTranscript(accumulatedTextRef.current + (interim ? ' ' + interim : ''));
+      const fullText = (finalTranscript + interimTranscript).trim();
+      liveTranscriptRef.current = fullText;
+      setLiveTranscript(fullText);
     };
 
     recognition.onerror = (event) => {
@@ -66,13 +70,15 @@ export default function VoiceControls({
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         setSpeechActive(window.speechSynthesis.speaking);
       }
-    }, 200);
+    }, 150);
 
     return () => {
       clearInterval(interval);
       shouldListenRef.current = false;
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
       }
     };
   }, []);
@@ -85,23 +91,23 @@ export default function VoiceControls({
 
     if (isListening) {
       shouldListenRef.current = false;
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {}
       setIsListening(false);
+      try {
+        recognitionRef.current.abort();
+      } catch (e) {}
 
-      const finalPhrase = accumulatedTextRef.current.trim() || liveTranscript.trim();
+      const finalPhrase = liveTranscriptRef.current.trim();
       if (finalPhrase) {
         onTranscriptReady(finalPhrase);
       }
 
-      accumulatedTextRef.current = '';
+      liveTranscriptRef.current = '';
       setLiveTranscript('');
     } else {
       if (window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
-      accumulatedTextRef.current = '';
+      liveTranscriptRef.current = '';
       setLiveTranscript('');
       shouldListenRef.current = true;
       setIsListening(true);

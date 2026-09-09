@@ -2,8 +2,9 @@ import React, { useEffect, useRef } from 'react';
 
 /**
  * VoiceOrbVisualizer
- * Renders an interactive, voice-sensitive fluid globe and equalizer canvas.
- * Uses Web Audio API AnalyserNode when listening to react to real microphone frequencies.
+ * Renders an ultra-crisp, high-DPI 3D floating sphere with volumetric shading,
+ * realistic Fresnel edge glow, specular highlights, and voice-reactive equalizer orbits.
+ * Canvas resolution scales automatically with window.devicePixelRatio to eliminate blurriness.
  */
 export default function VoiceOrbVisualizer({
   isListening = false,
@@ -74,23 +75,35 @@ export default function VoiceOrbVisualizer({
     };
   }, [isListening]);
 
-  // Main canvas animation loop
+  // Main canvas animation loop with Retina high-DPI scaling
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let phase = 0;
 
+    const CSS_WIDTH = 340;
+    const CSS_HEIGHT = 300;
+
     const render = () => {
-      phase += 0.035;
-      const width = canvas.width;
-      const height = canvas.height;
-      const centerX = width / 2;
-      const centerY = height / 2;
+      // 1. High-DPI Canvas Buffer Sync (Eliminates blurriness on Retina / 4K / scaled displays)
+      const dpr = window.devicePixelRatio || 1;
+      const targetPixelWidth = Math.floor(CSS_WIDTH * dpr);
+      const targetPixelHeight = Math.floor(CSS_HEIGHT * dpr);
 
-      ctx.clearRect(0, 0, width, height);
+      if (canvas.width !== targetPixelWidth || canvas.height !== targetPixelHeight) {
+        canvas.width = targetPixelWidth;
+        canvas.height = targetPixelHeight;
+      }
 
-      // Measure audio intensity
+      ctx.save();
+      // Scale all drawing coordinates by DPR so everything renders at native display density
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, CSS_WIDTH, CSS_HEIGHT);
+
+      phase += 0.032;
+
+      // 2. Compute audio intensity
       let volume = 0;
       let freqBins = [];
       if (isListening && analyserRef.current && dataArrayRef.current) {
@@ -103,40 +116,66 @@ export default function VoiceOrbVisualizer({
         volume = sum / (count * 255); // 0.0 to 1.0
         freqBins = Array.from(dataArrayRef.current.slice(0, 32));
       } else if (isSpeaking) {
-        // Simulated voice rhythm for assistant speech
-        volume = 0.25 + 0.2 * Math.sin(phase * 4) * Math.cos(phase * 2.5);
+        volume = 0.28 + 0.18 * Math.sin(phase * 4.2) * Math.cos(phase * 2.8);
       } else if (isProcessing) {
-        // Thinking rhythm
-        volume = 0.15 + 0.08 * Math.sin(phase * 6);
+        volume = 0.16 + 0.09 * Math.sin(phase * 5.5);
       } else {
-        // Idle calm breathing
-        volume = 0.05 + 0.03 * Math.sin(phase * 1.5);
+        volume = 0.05 + 0.025 * Math.sin(phase * 1.6);
       }
 
-      // Base radius based on canvas size
-      const baseRadius = Math.min(width, height) * 0.24 + volume * 25;
+      // 3. Smooth Floating Sine Wave Displacement (Center of Sphere)
+      const centerX = CSS_WIDTH / 2;
+      const floatYOffset = Math.sin(phase * 1.8) * 6;
+      const centerY = CSS_HEIGHT / 2 + floatYOffset;
 
-      // 1. Outer Equalizer Radial Waves / Bars
-      const numBars = 36;
+      // Sphere base radius (crisp, bounded expansion on speech)
+      const sphereRadius = Math.min(CSS_WIDTH, CSS_HEIGHT) * 0.22 + volume * 18;
+
+      // 4. Ambient Halo Glow Behind Sphere
+      const haloRadius = sphereRadius * 1.7;
+      const haloGrad = ctx.createRadialGradient(
+        centerX, centerY, sphereRadius * 0.5,
+        centerX, centerY, haloRadius
+      );
+      if (isListening) {
+        haloGrad.addColorStop(0, 'rgba(239, 68, 68, 0.35)');
+        haloGrad.addColorStop(0.5, 'rgba(239, 68, 68, 0.12)');
+        haloGrad.addColorStop(1, 'rgba(239, 68, 68, 0)');
+      } else if (isProcessing) {
+        haloGrad.addColorStop(0, 'rgba(99, 102, 241, 0.4)');
+        haloGrad.addColorStop(0.5, 'rgba(59, 130, 246, 0.12)');
+        haloGrad.addColorStop(1, 'rgba(59, 130, 246, 0)');
+      } else {
+        haloGrad.addColorStop(0, 'rgba(37, 99, 235, 0.38)');
+        haloGrad.addColorStop(0.5, 'rgba(59, 130, 246, 0.14)');
+        haloGrad.addColorStop(1, 'rgba(37, 99, 235, 0)');
+      }
+      ctx.fillStyle = haloGrad;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, haloRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 5. Outer Audio Equalizer Radial Beams (Precision Lines)
+      const numBars = 40;
       const angleStep = (Math.PI * 2) / numBars;
       ctx.save();
       ctx.translate(centerX, centerY);
 
       for (let i = 0; i < numBars; i++) {
         const angle = i * angleStep;
-        let barHeight = 6;
+        let barHeight = 4;
         if (freqBins.length > 0) {
           const binVal = freqBins[i % freqBins.length] || 0;
-          barHeight = 6 + (binVal / 255) * 45;
+          barHeight = 4 + (binVal / 255) * 40;
         } else if (isSpeaking) {
-          barHeight = 6 + Math.abs(Math.sin(phase * 3 + i * 0.4)) * 32;
+          barHeight = 4 + Math.abs(Math.sin(phase * 3.5 + i * 0.45)) * 28;
         } else if (isProcessing) {
-          barHeight = 6 + (Math.sin(phase * 5 + i * 0.3) > 0.5 ? 16 : 4);
+          barHeight = 4 + (Math.sin(phase * 6 + i * 0.4) > 0.4 ? 14 : 3);
         } else {
-          barHeight = 4 + Math.sin(phase + i * 0.5) * 3;
+          barHeight = 3 + Math.sin(phase * 1.5 + i * 0.5) * 3;
         }
 
-        const startDist = baseRadius + 14;
+        const startDist = sphereRadius + 10;
         const endDist = startDist + barHeight;
 
         const x1 = Math.cos(angle) * startDist;
@@ -147,134 +186,158 @@ export default function VoiceOrbVisualizer({
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 2.0;
 
-        // Color coding
         if (isListening) {
-          ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 + (barHeight / 50) * 0.6})`; // Red pulse for mic
+          ctx.strokeStyle = `rgba(239, 68, 68, ${0.45 + (barHeight / 44) * 0.55})`;
         } else if (isSpeaking) {
-          ctx.strokeStyle = `rgba(37, 99, 235, ${0.4 + (barHeight / 40) * 0.6})`; // Deep royal blue
+          ctx.strokeStyle = `rgba(37, 99, 235, ${0.5 + (barHeight / 32) * 0.5})`;
         } else if (isProcessing) {
-          ctx.strokeStyle = `rgba(59, 130, 246, ${0.4 + (barHeight / 30) * 0.5})`; // Blue pulse
+          ctx.strokeStyle = `rgba(99, 102, 241, ${0.4 + (barHeight / 20) * 0.6})`;
         } else {
           ctx.strokeStyle = isDark
-            ? `rgba(59, 130, 246, 0.25)`
-            : `rgba(37, 99, 235, 0.22)`;
+            ? `rgba(96, 165, 250, 0.3)`
+            : `rgba(37, 99, 235, 0.28)`;
         }
         ctx.stroke();
       }
       ctx.restore();
 
-      // 2. Soft Outer Ambient Glow
-      const glowGrad = ctx.createRadialGradient(
-        centerX, centerY, baseRadius * 0.4,
-        centerX, centerY, baseRadius * 1.6
-      );
-      if (isListening) {
-        glowGrad.addColorStop(0, 'rgba(239, 68, 68, 0.35)');
-        glowGrad.addColorStop(0.6, 'rgba(239, 68, 68, 0.12)');
-        glowGrad.addColorStop(1, 'rgba(239, 68, 68, 0)');
-      } else if (isProcessing) {
-        glowGrad.addColorStop(0, 'rgba(99, 102, 241, 0.35)');
-        glowGrad.addColorStop(0.6, 'rgba(37, 99, 235, 0.12)');
-        glowGrad.addColorStop(1, 'rgba(37, 99, 235, 0)');
-      } else {
-        glowGrad.addColorStop(0, 'rgba(37, 99, 235, 0.35)');
-        glowGrad.addColorStop(0.6, 'rgba(37, 99, 235, 0.12)');
-        glowGrad.addColorStop(1, 'rgba(37, 99, 235, 0)');
-      }
-      ctx.fillStyle = glowGrad;
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, baseRadius * 1.6, 0, Math.PI * 2);
-      ctx.fill();
+      // 6. Crisp Geometric 3D SPHERE (True pristine circle with 3D spherical lighting)
+      // Light source located at top-left:
+      const lightX = centerX - sphereRadius * 0.32;
+      const lightY = centerY - sphereRadius * 0.32;
 
-      // 3. Fluid Organic Globe Boundary (Deforming with harmonic waves)
-      const numPoints = 64;
-      const points = [];
-      const waveFreq = isListening ? 6 : 4;
-      const waveAmp = (isListening ? 12 : 6) + volume * 22;
-
-      for (let i = 0; i < numPoints; i++) {
-        const theta = (i / numPoints) * Math.PI * 2;
-        // Harmonic noise simulation
-        const offset =
-          Math.sin(theta * waveFreq + phase * 2) * waveAmp * 0.6 +
-          Math.cos(theta * 2 - phase * 1.5) * waveAmp * 0.4;
-        const r = baseRadius + offset;
-        points.push({
-          x: centerX + Math.cos(theta) * r,
-          y: centerY + Math.sin(theta) * r
-        });
-      }
-
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < numPoints; i++) {
-        const xc = (points[i].x + points[(i + 1) % numPoints].x) / 2;
-        const yc = (points[i].y + points[(i + 1) % numPoints].y) / 2;
-        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-      }
-      ctx.closePath();
-
-      // Globe Fill Gradient
-      const orbGrad = ctx.createRadialGradient(
-        centerX - baseRadius * 0.25,
-        centerY - baseRadius * 0.25,
-        baseRadius * 0.1,
+      // Base Volumetric Shading Gradient
+      const sphereGrad = ctx.createRadialGradient(
+        lightX,
+        lightY,
+        sphereRadius * 0.08,
         centerX,
         centerY,
-        baseRadius * 1.1
+        sphereRadius * 1.05
       );
 
       if (isListening) {
-        orbGrad.addColorStop(0, '#FCA5A5');
-        orbGrad.addColorStop(0.4, '#EF4444');
-        orbGrad.addColorStop(0.85, '#B91C1C');
-        orbGrad.addColorStop(1, '#7F1D1D');
+        // Vibrant 3D Crimson Sphere
+        sphereGrad.addColorStop(0.0, '#FCA5A5'); // Specular highlight region
+        sphereGrad.addColorStop(0.2, '#EF4444'); // Vibrant diffuse midtone
+        sphereGrad.addColorStop(0.55, '#DC2626');
+        sphereGrad.addColorStop(0.85, '#991B1B'); // Deep core shadow
+        sphereGrad.addColorStop(1.0, '#450A0A'); // Shadowed limb
       } else if (isProcessing) {
-        orbGrad.addColorStop(0, '#93C5FD');
-        orbGrad.addColorStop(0.4, '#6366F1');
-        orbGrad.addColorStop(0.85, '#2563EB');
-        orbGrad.addColorStop(1, '#1E3A8A');
+        // High-energy Electric Violet/Indigo Sphere
+        sphereGrad.addColorStop(0.0, '#E0E7FF');
+        sphereGrad.addColorStop(0.2, '#818CF8');
+        sphereGrad.addColorStop(0.55, '#4F46E5');
+        sphereGrad.addColorStop(0.85, '#312E81');
+        sphereGrad.addColorStop(1.0, '#1E1B4B');
       } else {
-        // Classic Aesthetic Blue Orb
-        orbGrad.addColorStop(0, '#93C5FD');
-        orbGrad.addColorStop(0.35, '#3B82F6');
-        orbGrad.addColorStop(0.75, '#1D4ED8');
-        orbGrad.addColorStop(1, '#1E3A8A');
+        // Deep Aesthetic Sapphire 3D Sphere
+        sphereGrad.addColorStop(0.0, '#BAE6FD'); // Crisp cyan-white specular highlight
+        sphereGrad.addColorStop(0.22, '#38BDF8'); // Sky blue diffuse
+        sphereGrad.addColorStop(0.52, '#2563EB'); // Royal blue body
+        sphereGrad.addColorStop(0.82, '#1D4ED8'); // Deep navy ambient core
+        sphereGrad.addColorStop(1.0, '#0F172A'); // Midnight limb shadow
       }
 
-      ctx.fillStyle = orbGrad;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, sphereRadius, 0, Math.PI * 2);
+      ctx.fillStyle = sphereGrad;
       ctx.fill();
 
-      // Fluid border stroke
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = isListening ? 'rgba(254, 202, 202, 0.7)' : 'rgba(191, 219, 254, 0.7)';
+      // 7. Dynamic 3D Latitude Energy Rings (Adds authentic depth & sphere curvature)
+      ctx.save();
+      // Clip drawing strictly to sphere interior so rings follow sphere curvature perfectly
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, sphereRadius, 0, Math.PI * 2);
+      ctx.clip();
+
+      const numRings = 3;
+      for (let r = 0; r < numRings; r++) {
+        const ringPhase = phase + r * 1.2;
+        const ringOffsetY = Math.sin(ringPhase) * (sphereRadius * 0.55);
+        const ringWidth = Math.sqrt(Math.max(0, sphereRadius * sphereRadius - ringOffsetY * ringOffsetY));
+
+        ctx.beginPath();
+        ctx.ellipse(
+          centerX,
+          centerY + ringOffsetY,
+          ringWidth * 0.95,
+          sphereRadius * 0.22,
+          0,
+          0,
+          Math.PI * 2
+        );
+        ctx.lineWidth = 1.2;
+        if (isListening) {
+          ctx.strokeStyle = `rgba(254, 202, 202, ${0.25 + 0.15 * Math.sin(phase * 2 + r)})`;
+        } else if (isProcessing) {
+          ctx.strokeStyle = `rgba(199, 210, 254, ${0.25 + 0.15 * Math.sin(phase * 2.5 + r)})`;
+        } else {
+          ctx.strokeStyle = `rgba(186, 230, 253, ${0.22 + 0.14 * Math.sin(phase * 2 + r)})`;
+        }
+        ctx.stroke();
+      }
+
+      // 8. 3D Specular Highlight Hotspot (Glossy shine on sphere curvature)
+      const specGrad = ctx.createRadialGradient(
+        lightX,
+        lightY,
+        1,
+        lightX,
+        lightY,
+        sphereRadius * 0.42
+      );
+      specGrad.addColorStop(0.0, 'rgba(255, 255, 255, 0.92)');
+      specGrad.addColorStop(0.2, 'rgba(255, 255, 255, 0.65)');
+      specGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.18)');
+      specGrad.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
+
+      ctx.beginPath();
+      ctx.arc(lightX, lightY, sphereRadius * 0.42, 0, Math.PI * 2);
+      ctx.fillStyle = specGrad;
+      ctx.fill();
+
+      // 9. Secondary Ambient Bounce Light (Bottom right rim glow from reflected light)
+      const bounceX = centerX + sphereRadius * 0.42;
+      const bounceY = centerY + sphereRadius * 0.42;
+      const bounceGrad = ctx.createRadialGradient(
+        bounceX,
+        bounceY,
+        2,
+        bounceX,
+        bounceY,
+        sphereRadius * 0.45
+      );
+      if (isListening) {
+        bounceGrad.addColorStop(0.0, 'rgba(254, 202, 202, 0.28)');
+        bounceGrad.addColorStop(1.0, 'rgba(254, 202, 202, 0.0)');
+      } else {
+        bounceGrad.addColorStop(0.0, 'rgba(147, 197, 253, 0.28)');
+        bounceGrad.addColorStop(1.0, 'rgba(147, 197, 253, 0.0)');
+      }
+      ctx.beginPath();
+      ctx.arc(bounceX, bounceY, sphereRadius * 0.45, 0, Math.PI * 2);
+      ctx.fillStyle = bounceGrad;
+      ctx.fill();
+
+      ctx.restore(); // Restore clip
+
+      // 10. Crisp Fresnel Rim Outline (Razor-sharp perimeter edge)
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, sphereRadius, 0, Math.PI * 2);
+      ctx.lineWidth = 2.0;
+      if (isListening) {
+        ctx.strokeStyle = 'rgba(254, 202, 202, 0.85)';
+      } else if (isProcessing) {
+        ctx.strokeStyle = 'rgba(199, 210, 254, 0.85)';
+      } else {
+        ctx.strokeStyle = 'rgba(186, 230, 253, 0.85)';
+      }
       ctx.stroke();
 
-      // 4. Inner Plasma Highlights
-      const highlightGrad = ctx.createRadialGradient(
-        centerX - baseRadius * 0.35,
-        centerY - baseRadius * 0.35,
-        2,
-        centerX - baseRadius * 0.35,
-        centerY - baseRadius * 0.35,
-        baseRadius * 0.5
-      );
-      highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.7)');
-      highlightGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
-      highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-      ctx.fillStyle = highlightGrad;
-      ctx.beginPath();
-      ctx.arc(
-        centerX - baseRadius * 0.35,
-        centerY - baseRadius * 0.35,
-        baseRadius * 0.5,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
+      ctx.restore(); // Restore DPR scale
 
       animFrameIdRef.current = requestAnimationFrame(render);
     };
@@ -289,12 +352,11 @@ export default function VoiceOrbVisualizer({
   }, [isListening, isProcessing, isSpeaking, isDark]);
 
   return (
-    <div className="relative flex items-center justify-center w-full max-w-[340px] h-[300px] select-none pointer-events-none">
+    <div className="relative flex items-center justify-center w-[340px] h-[300px] select-none pointer-events-none">
       <canvas
         ref={canvasRef}
-        width={340}
-        height={300}
-        className="w-full h-full block"
+        style={{ width: 340, height: 300 }}
+        className="block"
       />
     </div>
   );

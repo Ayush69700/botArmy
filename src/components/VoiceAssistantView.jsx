@@ -44,9 +44,10 @@ export default function VoiceAssistantView({
 
   const recognitionRef = useRef(null);
   const shouldListenRef = useRef(false);
-  const accumulatedTextRef = useRef('');
+  const liveTranscriptRef = useRef('');
+  const silenceTimerRef = useRef(null);
 
-  // SpeechRecognition setup
+  // High-performance, low-latency SpeechRecognition setup
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -57,19 +58,36 @@ export default function VoiceAssistantView({
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1; // Reduces recognition overhead for lower latency
     recognition.lang = 'en-US';
 
     recognition.onresult = (event) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const item = event.results[i];
-        if (item.isFinal) {
-          accumulatedTextRef.current += (accumulatedTextRef.current ? ' ' : '') + item[0].transcript.trim();
+      // Clear any pending silence timer on new sound
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+
+      // Reconstruct transcript with zero latency across final + interim results
+      let finalTranscript = '';
+      let interimTranscript = '';
+      for (let i = 0; i < event.results.length; ++i) {
+        const res = event.results[i];
+        if (res.isFinal) {
+          finalTranscript += res[0].transcript + ' ';
         } else {
-          interim += item[0].transcript;
+          interimTranscript += res[0].transcript;
         }
       }
-      setLiveTranscript(accumulatedTextRef.current + (interim ? ' ' + interim : ''));
+
+      const combinedText = (finalTranscript + interimTranscript).trim();
+      liveTranscriptRef.current = combinedText;
+      setLiveTranscript(combinedText);
+
+      // Instantaneously stream recognized speech directly into the prompt input field
+      if (combinedText) {
+        setInputText(combinedText);
+      }
     };
 
     recognition.onerror = (event) => {
@@ -97,18 +115,48 @@ export default function VoiceAssistantView({
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         setIsSpeaking(window.speechSynthesis.speaking);
       }
-    }, 200);
+    }, 150);
 
     return () => {
       clearInterval(interval);
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
       shouldListenRef.current = false;
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
       }
     };
   }, []);
 
-  // Toggle listening button (manual control: click to start, click again to stop & send)
+  // Stop listening and immediately send without buffer delays
+  const stopListeningAndSend = (autoSend = true) => {
+    shouldListenRef.current = false;
+    setIsListening(false);
+
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch (e) {}
+    }
+
+    const textToSend = liveTranscriptRef.current.trim() || inputText.trim();
+    if (autoSend && textToSend) {
+      onSendMessage(textToSend);
+      setInputText('');
+      liveTranscriptRef.current = '';
+      setLiveTranscript('');
+    }
+  };
+
+  // Toggle listening button (starts voice input or instantly finishes and sends)
   const toggleListening = () => {
     if (!isSupported || !recognitionRef.current) {
       alert("Browser Speech Recognition is not supported. Please use Chrome or Edge!");
@@ -116,26 +164,15 @@ export default function VoiceAssistantView({
     }
 
     if (isListening) {
-      shouldListenRef.current = false;
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {}
-      setIsListening(false);
-
-      const finalPhrase = accumulatedTextRef.current.trim() || liveTranscript.trim();
-      if (finalPhrase) {
-        onSendMessage(finalPhrase);
-      }
-
-      accumulatedTextRef.current = '';
-      setLiveTranscript('');
+      stopListeningAndSend(true);
     } else {
       if (window.speechSynthesis) {
         window.speechSynthesis.cancel();
         setIsSpeaking(false);
       }
-      accumulatedTextRef.current = '';
+      liveTranscriptRef.current = '';
       setLiveTranscript('');
+      setInputText('');
       shouldListenRef.current = true;
       setIsListening(true);
 
@@ -155,14 +192,36 @@ export default function VoiceAssistantView({
   };
 
   const handlePromptClick = (text) => {
+    setInputText(text);
     onSendMessage(text);
   };
 
   const handleTextSubmit = (e) => {
-    e.preventDefault();
-    if (!inputText.trim() || isProcessing) return;
-    onSendMessage(inputText.trim());
+    e?.preventDefault();
+    const query = inputText.trim() || liveTranscriptRef.current.trim();
+    if (!query || isProcessing) return;
+
+    if (isListening) {
+      shouldListenRef.current = false;
+      setIsListening(false);
+      try {
+        recognitionRef.current?.abort();
+      } catch (e) {}
+    }
+
+    onSendMessage(query);
     setInputText('');
+    liveTranscriptRef.current = '';
+    setLiveTranscript('');
+  };
+
+  const handleClearInput = () => {
+    setInputText('');
+    liveTranscriptRef.current = '';
+    setLiveTranscript('');
+    if (isListening) {
+      toggleListening();
+    }
   };
 
   // Get the latest user turn and assistant reply
@@ -186,7 +245,7 @@ export default function VoiceAssistantView({
             Voice Core Interface
           </span>
           <span className="text-[10px] font-mono px-1.5 py-0.5 border border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60">
-            Natural Speech Engine
+            Low-Latency Speech Engine
           </span>
         </div>
 
@@ -239,12 +298,12 @@ export default function VoiceAssistantView({
 
       {/* Main Center Stage */}
       <div className="flex-1 flex flex-col items-center justify-between p-4 overflow-y-auto min-h-0">
-        {/* Top Space / Live Transcript Status */}
-        <div className="w-full max-w-xl text-center min-h-[32px] flex items-center justify-center">
+        {/* Top Space / Live Status Banner */}
+        <div className="w-full max-w-xl text-center min-h-[30px] flex items-center justify-center">
           {isListening ? (
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-600/10 border border-red-500/30 text-red-500 text-xs font-mono animate-pulse">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-600/10 border border-red-500/40 text-red-500 text-xs font-mono animate-pulse">
               <span className="w-2 h-2 rounded-full bg-red-500"></span>
-              <span>LISTENING TO YOUR VOICE (Click Big Button To Send)</span>
+              <span className="font-semibold">VOICE INPUT ACTIVE — STREAMING LIVE INTO PROMPT</span>
             </div>
           ) : isProcessing ? (
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-600/10 border border-blue-500/30 text-blue-500 text-xs font-mono">
@@ -258,12 +317,12 @@ export default function VoiceAssistantView({
             </div>
           ) : (
             <span className={`text-xs font-mono ${textMuted}`}>
-              Press the central button to speak naturally. Context is bounded to top-5 memories.
+              Speak naturally via microphone or type in the prompt bar below. Context bounded to top-5 memories.
             </span>
           )}
         </div>
 
-        {/* Center: The Fluid Voice-Sensitive Globe & Equalizer */}
+        {/* Center: The Crisp 3D Floating Sphere & Equalizer */}
         <div className="flex flex-col items-center justify-center my-auto py-2 select-none">
           <VoiceOrbVisualizer
             isListening={isListening}
@@ -273,13 +332,13 @@ export default function VoiceAssistantView({
           />
 
           {/* Big Central Voice Button */}
-          <div className="mt-4 flex flex-col items-center gap-2">
+          <div className="mt-3 flex flex-col items-center gap-1.5">
             <button
               type="button"
               onClick={toggleListening}
               disabled={isProcessing}
-              title={isListening ? 'Click to stop listening and send' : 'Click to start speaking'}
-              className={`relative flex items-center justify-center gap-3 px-8 py-4 border font-mono uppercase tracking-wider text-sm transition-all duration-200 rounded-none shadow-lg ${
+              title={isListening ? 'Click to stop listening and send prompt immediately' : 'Click to start speaking'}
+              className={`relative flex items-center justify-center gap-3 px-8 py-3.5 border font-mono uppercase tracking-wider text-sm transition-all duration-200 rounded-none shadow-lg ${
                 isListening
                   ? 'bg-red-600 hover:bg-red-700 text-white border-red-700 ring-4 ring-red-500/30 scale-105'
                   : isProcessing
@@ -290,7 +349,7 @@ export default function VoiceAssistantView({
               {isListening ? (
                 <>
                   <MicOff className="w-5 h-5 animate-pulse" />
-                  <span className="font-bold">STOP & SEND VOICE</span>
+                  <span className="font-bold">STOP & SEND PROMPT</span>
                 </>
               ) : isProcessing ? (
                 <>
@@ -308,27 +367,15 @@ export default function VoiceAssistantView({
             {/* Hint Under Big Button */}
             <span className={`text-[11px] font-mono ${isListening ? 'text-red-500 font-semibold' : textMuted}`}>
               {isListening
-                ? 'Speaking live... Click button again when finished speaking.'
-                : 'Click button to begin continuous microphone listening'}
+                ? 'Speaking live... Syllables stream immediately into prompt bar.'
+                : 'Click button to dictate with ultra-low latency voice recognition'}
             </span>
           </div>
         </div>
 
-        {/* Live Interim Transcript (Displays as user speaks) */}
-        {isListening && liveTranscript && (
-          <div className="w-full max-w-xl my-2 p-3 bg-red-500/10 border border-red-500/30 text-center">
-            <span className="text-[10px] font-mono uppercase text-red-500 font-semibold block mb-1">
-              Live Speech-to-Text:
-            </span>
-            <p className={`text-sm italic font-medium ${textPrimary}`}>
-              "{liveTranscript}"
-            </p>
-          </div>
-        )}
-
         {/* Spoken Dialogue Caption Cards (Latest Exchange) */}
         {!isListening && (lastUserMsg || lastAssistantMsg) && (
-          <div className={`w-full max-w-xl p-4 border space-y-3 mt-2 ${bgSubtle}`}>
+          <div className={`w-full max-w-xl p-3.5 border space-y-2.5 my-2 ${bgSubtle}`}>
             {/* User Utterance */}
             {lastUserMsg && (
               <div className="flex items-start gap-2.5">
@@ -383,18 +430,14 @@ export default function VoiceAssistantView({
         )}
 
         {/* Quick Demo Prompts Pill Bar */}
-        <div className="w-full max-w-xl mt-3">
+        <div className="w-full max-w-xl mt-1 mb-2">
           <div className="flex items-center justify-between mb-1.5">
             <span className={`text-[11px] font-mono uppercase ${textMuted}`}>
               Quick Voice Test Prompts:
             </span>
-            <button
-              type="button"
-              onClick={() => setShowKeyboardInput(!showKeyboardInput)}
-              className={`text-[11px] font-mono underline ${textMuted} hover:${textPrimary}`}
-            >
-              {showKeyboardInput ? 'Hide Keyboard Input' : 'Type Message Instead'}
-            </button>
+            <span className={`text-[10px] font-mono ${textMuted}`}>
+              Click to run demo
+            </span>
           </div>
 
           <div className="flex flex-wrap gap-1.5">
@@ -414,29 +457,102 @@ export default function VoiceAssistantView({
               </button>
             ))}
           </div>
+        </div>
 
-          {/* Optional Text Input Form */}
-          {showKeyboardInput && (
-            <form onSubmit={handleTextSubmit} className="mt-2 flex items-center gap-1.5">
+        {/* Permanent Real-Time Prompt Input Bar (Streams voice instantly into field) */}
+        <div className="w-full max-w-xl">
+          <form
+            onSubmit={handleTextSubmit}
+            className={`flex items-center gap-2 p-1.5 border shadow-sm ${
+              isListening
+                ? 'border-red-500 ring-2 ring-red-500/20 bg-red-950/10'
+                : isDark
+                ? 'bg-[#1C1C1C] border-[#383838]'
+                : 'bg-white border-slate-300'
+            }`}
+          >
+            {/* Direct Microphone Toggle in Prompt Bar */}
+            <button
+              type="button"
+              onClick={toggleListening}
+              disabled={isProcessing}
+              title={isListening ? "Click to stop listening and send" : "Click to speak prompt"}
+              className={`flex items-center justify-center w-9 h-9 border transition shrink-0 rounded-none ${
+                isListening
+                  ? 'bg-red-600 hover:bg-red-700 text-white border-red-700 animate-pulse'
+                  : isDark
+                  ? 'bg-[#2A2A2A] hover:bg-[#333] text-[#ECECEC] border-[#444]'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+              }`}
+            >
+              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4 text-blue-500" />}
+            </button>
+
+            {/* Prompt Input Field (Synchronized in real-time with voice speech recognition) */}
+            <div className="relative flex-1 flex items-center">
               <input
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="Type your message if you cannot use voice..."
+                placeholder={
+                  isListening
+                    ? "Listening... your voice appears here instantly..."
+                    : "Speak or type your prompt here..."
+                }
                 disabled={isProcessing}
-                className={`flex-1 border px-3 py-1.5 text-xs focus:outline-none focus:border-blue-600 rounded-none ${
-                  isDark ? 'bg-[#181818] border-[#383838] text-[#ECECEC]' : 'bg-white border-slate-300 text-slate-900'
-                }`}
+                className={`w-full px-2.5 py-1.5 text-xs font-sans focus:outline-none bg-transparent ${textPrimary}`}
               />
-              <button
-                type="submit"
-                disabled={!inputText.trim() || isProcessing}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-mono uppercase font-semibold transition rounded-none shadow-sm disabled:opacity-50"
-              >
-                Send
-              </button>
-            </form>
-          )}
+              {inputText && (
+                <button
+                  type="button"
+                  onClick={handleClearInput}
+                  title="Clear input"
+                  className={`text-[11px] font-mono px-1.5 py-0.5 hover:text-red-500 ${textMuted}`}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Send Button */}
+            <button
+              type="submit"
+              disabled={(!inputText.trim() && !isListening) || isProcessing}
+              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-mono uppercase font-bold tracking-wider transition rounded-none shrink-0 ${
+                isListening
+                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                  : inputText.trim() && !isProcessing
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
+                  : isDark
+                  ? 'bg-[#2A2A2A] text-slate-500 border border-[#383838] cursor-not-allowed'
+                  : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+              }`}
+            >
+              {isListening ? (
+                <>
+                  <MicOff className="w-3.5 h-3.5" />
+                  <span>Send</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Send</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Latency / Voice Status caption under prompt bar */}
+          <div className="flex items-center justify-between px-1 mt-1">
+            <span className={`text-[10px] font-mono ${isListening ? 'text-red-500 font-semibold animate-pulse' : textMuted}`}>
+              {isListening
+                ? '🔴 Live mic audio active — ultra-low latency transcription'
+                : '💡 Tip: Click the mic in the bar or tap the 3D sphere to speak'}
+            </span>
+            <span className={`text-[10px] font-mono ${textMuted}`}>
+              Continuous VAD enabled
+            </span>
+          </div>
         </div>
       </div>
 
