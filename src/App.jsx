@@ -10,10 +10,11 @@ import {
   X,
   Sun,
   Moon,
-  Layers
+  Layers,
+  PanelRightOpen
 } from 'lucide-react';
 
-import ChatWindow from './components/ChatWindow.jsx';
+import VoiceAssistantView from './components/VoiceAssistantView.jsx';
 import ContextWindowPanel from './components/ContextWindowPanel.jsx';
 
 import {
@@ -74,6 +75,7 @@ export default function App() {
   // Modals & Settings
   const [showSettings, setShowSettings] = useState(false);
   const [showHonestAnswer, setShowHonestAnswer] = useState(false);
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
 
   // LLM Config (defaults to user's Groq key with gpt-oss-120b)
   const [apiKey, setApiKey] = useState(() => {
@@ -377,6 +379,23 @@ export default function App() {
             <span className="hidden sm:inline">Reset</span>
           </button>
 
+          {/* Toggle Right Side Panel Button */}
+          <button
+            type="button"
+            onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
+            title={isPanelCollapsed ? "Show Context Window Panel" : "Minimize Context Window Panel"}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border text-xs font-mono uppercase transition rounded-none ${
+              !isPanelCollapsed
+                ? isDark
+                  ? 'bg-[#2A2A2A] hover:bg-[#333] text-[#ECECEC] border-[#383838]'
+                  : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+                : 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 font-semibold'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">{isPanelCollapsed ? "Open Panel" : "Minimize Panel"}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setShowSettings(true)}
@@ -388,11 +407,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content Layout: Left = Chat Window, Right = Unified Context Window Panel */}
-      <main className="flex-1 p-3 grid grid-cols-1 lg:grid-cols-12 gap-3 overflow-hidden">
-        {/* Left Column: Chat Window (takes 7 columns) */}
-        <div className="lg:col-span-7 h-full flex flex-col min-h-0">
-          <ChatWindow
+      {/* Main Content Layout: Voice Assistant Stage + Collapsible Context Window Panel */}
+      <main className="flex-1 p-3 flex gap-3 overflow-hidden">
+        {/* Left / Center: Dedicated Voice-Focused Assistant Stage */}
+        <div className="flex-1 h-full flex flex-col min-h-0 transition-all duration-200">
+          <VoiceAssistantView
             messages={messages}
             onSendMessage={handleSendMessage}
             isProcessing={isProcessing}
@@ -402,19 +421,43 @@ export default function App() {
           />
         </div>
 
-        {/* Right Column: Unified Single Section Context Window Panel (takes 5 columns) */}
-        <div className="lg:col-span-5 h-full flex flex-col min-h-0">
-          <ContextWindowPanel
-            memories={memories}
-            efficiencyHistory={efficiencyHistory}
-            lastExtracted={lastExtracted}
-            latestUsedMemories={latestUsedMemories}
-            onManualRefresh={() => {
-              setMemories(getMemories());
-            }}
-            isDark={isDark}
-          />
-        </div>
+        {/* Right: Collapsible Unified Context Window Panel */}
+        {isPanelCollapsed ? (
+          <div className={`h-full w-12 border flex flex-col items-center justify-between py-3 shrink-0 transition-all duration-200 ${headerBg}`}>
+            <button
+              type="button"
+              onClick={() => setIsPanelCollapsed(false)}
+              title="Expand Context Window & Memory Bank"
+              className="p-2 bg-blue-600 text-white rounded-none hover:bg-blue-700 transition shadow-sm"
+            >
+              <PanelRightOpen className="w-4 h-4" />
+            </button>
+
+            <div className="flex flex-col items-center gap-6 my-auto select-none">
+              <span className="text-[11px] font-mono font-bold tracking-widest text-blue-600 dark:text-blue-400 rotate-90 whitespace-nowrap">
+                MEMORY ({memories.length})
+              </span>
+            </div>
+
+            <span className="text-[10px] font-mono text-slate-400">
+              {efficiencyHistory.length}T
+            </span>
+          </div>
+        ) : (
+          <div className="w-full lg:w-[440px] xl:w-[480px] h-full flex flex-col min-h-0 shrink-0 transition-all duration-200">
+            <ContextWindowPanel
+              memories={memories}
+              efficiencyHistory={efficiencyHistory}
+              lastExtracted={lastExtracted}
+              latestUsedMemories={latestUsedMemories}
+              onManualRefresh={() => {
+                setMemories(getMemories());
+              }}
+              isDark={isDark}
+              onToggleMinimize={() => setIsPanelCollapsed(true)}
+            />
+          </div>
+        )}
       </main>
 
       {/* Settings Modal */}
