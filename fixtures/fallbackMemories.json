@@ -1,0 +1,42 @@
+[
+  {
+    "id": "mem-seed-1",
+    "type": "fact",
+    "content": "User's older sister Maya is moving to Seattle for a new tech job next month",
+    "tag": "family",
+    "turn": 0,
+    "source": "conversation"
+  },
+  {
+    "id": "mem-seed-2",
+    "type": "preference",
+    "content": "Prefers iced oat milk matcha lattes with lavender syrup over espresso drinks",
+    "tag": "other",
+    "turn": 0,
+    "source": "conversation"
+  },
+  {
+    "id": "mem-seed-3",
+    "type": "fact",
+    "content": "Building an autonomous navigation rover for final year CS capstone project",
+    "tag": "school",
+    "turn": 0,
+    "source": "conversation"
+  },
+  {
+    "id": "mem-seed-4",
+    "type": "mood",
+    "content": "Feeling energized yet slightly sleep-deprived from the hackathon sprint",
+    "tag": "mood",
+    "turn": 0,
+    "source": "conversation"
+  },
+  {
+    "id": "mem-seed-5",
+    "type": "fact",
+    "content": "Prefers writing decoupled, modular code with minimal external dependencies",
+    "tag": "work",
+    "turn": 0,
+    "source": "conversation"
+  }
+]
