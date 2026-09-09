@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #FAFAF7;
+  --card: #FFFFFF;
+  --line: #E4E4DE;
+  --ink: #20222B;
+  --ink-dim: #7A7D87;
+  --blue: #3E63DD;
+  --blue-soft: #EDF1FD;
+  --blue-line: #C7D2F7;
+  --sans: -apple-system, "Inter", "Segoe UI", Roboto, sans-serif;
+  --serif: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Orb Gradients and Keyframe Animations */
+.voice-orb {
+  background: radial-gradient(circle at 35% 35%, rgba(62, 99, 221, 0.95), rgba(62, 99, 221, 0.12) 70%);
+  box-shadow: 0 0 50px rgba(62, 99, 221, 0.25);
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+}
+
+.voice-orb.orb-idle {
+  opacity: 0.85;
+  box-shadow: 0 0 30px rgba(62, 99, 221, 0.15);
+}
+
+.voice-orb.orb-listening {
+  animation: orb-pulse 2.2s infinite ease-in-out;
+}
+
+.voice-orb.orb-thinking {
+  animation: orb-breathe 3.5s infinite ease-in-out;
+}
+
+.voice-orb.orb-speaking {
+  animation: orb-speak 1.4s infinite ease-in-out;
+}
+
+@keyframes orb-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 45px rgba(62, 99, 221, 0.28);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 70px rgba(62, 99, 221, 0.42);
+  }
+}
+
+@keyframes orb-breathe {
+  0%, 100% {
+    transform: scale(0.97) rotate(0deg);
+    box-shadow: 0 0 35px rgba(62, 99, 221, 0.20);
+  }
+  50% {
+    transform: scale(1.03) rotate(180deg);
+    box-shadow: 0 0 55px rgba(62, 99, 221, 0.35);
+  }
+}
+
+@keyframes orb-speak {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 50px rgba(62, 99, 221, 0.30);
+  }
+  25% {
+    transform: scale(1.08);
+    box-shadow: 0 0 80px rgba(62, 99, 221, 0.50);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 0 60px rgba(62, 99, 221, 0.35);
+  }
+  75% {
+    transform: scale(1.09);
+    box-shadow: 0 0 85px rgba(62, 99, 221, 0.52);
+  }
+}
+
+/* Waveform Bar Keyframes */
+@keyframes wave-bounce {
+  0%, 100% {
+    height: 6px;
+  }
+  50% {
+    height: 22px;
+  }
+}
+
+.waveform-bar {
+  animation: wave-bounce 1s infinite ease-in-out;
+}
+
+/* Custom Scrollbar for clean aesthetics */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
