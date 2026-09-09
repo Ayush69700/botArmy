@@ -3,21 +3,26 @@ import React, { useState, KeyboardEvent } from 'react';
 interface ChatInputProps {
   onSendMessage: (text: string) => void;
   onOpenVoice: () => void;
+  suggestions?: string[];
   disabled?: boolean;
 }
 
-const SUGGESTED_PROMPTS = [
+const DEFAULT_PROMPTS = [
   "How's my training pace for the marathon?",
-  "What do you remember about my schedule?",
-  "I love drinking iced matcha in the morning",
+  "What do you remember about me?",
+  "My knee has been feeling a bit sore today",
+  "I like to start my day with iced matcha",
 ];
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSendMessage,
   onOpenVoice,
+  suggestions,
   disabled = false,
 }) => {
   const [value, setValue] = useState('');
+
+  const activePrompts = suggestions && suggestions.length > 0 ? suggestions : DEFAULT_PROMPTS;
 
   const handleSend = () => {
     if (value.trim() && !disabled) {
@@ -35,16 +40,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   return (
     <div className="border-t border-line px-4 md:px-7 py-3.5 bg-card flex flex-col gap-2.5">
-      {/* Quick Prompt Starters */}
+      {/* Quick Interactive Prompt Starters */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-        <span className="text-[11px] text-ink-dim uppercase font-medium tracking-wider shrink-0 mr-1">
-          Suggestions:
+        <span className="text-[11px] text-ink-dim uppercase font-medium tracking-wider shrink-0 mr-1 flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue animate-pulse" />
+          Interactive:
         </span>
-        {SUGGESTED_PROMPTS.map((prompt, i) => (
+        {activePrompts.map((prompt, i) => (
           <button
             key={i}
             onClick={() => onSendMessage(prompt)}
-            className="text-[12px] text-ink/80 hover:text-blue hover:border-blue-line bg-bg border border-line rounded-full px-3 py-1 whitespace-nowrap transition-colors select-none"
+            className="text-[12px] text-ink/80 hover:text-blue hover:border-blue hover:bg-blue-soft/50 bg-bg border border-line rounded-full px-3 py-1 whitespace-nowrap transition-all select-none active:scale-95"
           >
             {prompt}
           </button>
@@ -57,7 +63,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           <input
             type="text"
             className="w-full bg-bg border border-line rounded-full px-5 py-3 text-[14.5px] md:text-[15px] text-ink placeholder:text-ink-dim outline-none transition-colors focus:border-blue focus:ring-1 focus:ring-blue/30 shadow-inner"
-            placeholder="Message your companion (or share something to remember)…"
+            placeholder="Talk with your companion (type or use quick prompts above)…"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -97,7 +103,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth={2}
             strokeLinecap="round"
             strokeLinejoin="round"
             className="w-4 h-4"

@@ -9,6 +9,7 @@ interface LeftSidebarProps {
   memories: Memory[];
   isOpen?: boolean;
   onCloseMobile?: () => void;
+  onAskAboutMemory?: (memoryText: string) => void;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -18,6 +19,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   memories,
   isOpen = true,
   onCloseMobile,
+  onAskAboutMemory,
 }) => {
   return (
     <>
@@ -185,14 +187,22 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </span>
             </div>
             <div className="flex flex-col gap-1.5 max-h-[170px] overflow-y-auto pr-1">
-              {memories.slice(0, 4).map((m) => (
+              {memories.slice(0, 5).map((m) => (
                 <div
                   key={m.id}
-                  onClick={() => onNavigate('memory')}
-                  className="text-[12px] text-ink/80 hover:text-ink bg-bg/80 hover:bg-bg p-2 rounded-md border border-line/40 cursor-pointer line-clamp-2 transition-colors"
+                  onClick={() => {
+                    if (onAskAboutMemory) {
+                      onAskAboutMemory(m.text);
+                    } else {
+                      onNavigate('memory');
+                    }
+                    if (onCloseMobile) onCloseMobile();
+                  }}
+                  title="Click to ask companion about this memory"
+                  className="text-[12px] text-ink/80 hover:text-blue hover:bg-blue-soft/50 bg-bg/80 p-2 rounded-md border border-line/40 cursor-pointer line-clamp-2 transition-all hover:border-blue-line group"
                 >
-                  <span className="text-blue mr-1.5 font-bold">·</span>
-                  {m.text}
+                  <span className="text-blue mr-1.5 font-bold group-hover:animate-ping">·</span>
+                  <span>{m.text}</span>
                 </div>
               ))}
             </div>

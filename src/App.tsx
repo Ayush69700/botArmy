@@ -177,6 +177,52 @@ export const App: React.FC = () => {
     handleSendMessage(userText);
   };
 
+  // Compute dynamic interactive suggestion chips based on companion's last response
+  const lastAiMessage = [...messages].reverse().find((m) => m.sender === 'ai')?.text.toLowerCase() || '';
+
+  const getDynamicSuggestions = (): string[] => {
+    if (lastAiMessage.includes('sharp') || lastAiMessage.includes('dull') || lastAiMessage.includes('ache') || lastAiMessage.includes('knee')) {
+      return [
+        "It's a dull ache after running",
+        "It feels like a sharp twinge",
+        "Let's swap in low-impact cycling tomorrow",
+        "Can you suggest gentle knee mobility stretches?",
+      ];
+    }
+    if (lastAiMessage.includes('stretch') || lastAiMessage.includes('mobility')) {
+      return [
+        "Yes, give me 3 mobility stretches",
+        "I'll take a full rest day today",
+        "How many rest days should I take this week?",
+      ];
+    }
+    if (lastAiMessage.includes('morning') || lastAiMessage.includes('priority')) {
+      return [
+        "First priority is finishing my project work",
+        "Heading out for a 3-mile recovery jog",
+        "Keep it concise today, just 2 quick bullet points",
+      ];
+    }
+    if (lastAiMessage.includes('marathon') || lastAiMessage.includes('mileage') || lastAiMessage.includes('pacing')) {
+      return [
+        "Aiming for 6 miles this weekend",
+        "Breathing was good, but legs felt heavy",
+        "What target pace should I aim for on race day?",
+      ];
+    }
+    return [
+      "How is my half marathon training progress?",
+      "What memories do you have saved about me?",
+      "My knee has been feeling a little sore",
+      "I love drinking iced matcha in the morning",
+    ];
+  };
+
+  const handleAskAboutMemory = (memoryText: string) => {
+    setCurrentScreen('chat');
+    handleSendMessage(`Regarding what you remember about: "${memoryText}" — how should we factor that into my plan today?`);
+  };
+
   return (
     <div className="h-screen w-screen bg-bg text-ink flex overflow-hidden font-sans">
       {/* 1. LEFT PANEL: Navigation, Logo, + New Chat, Memory summary */}
@@ -187,6 +233,7 @@ export const App: React.FC = () => {
         memories={memories}
         isOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
+        onAskAboutMemory={handleAskAboutMemory}
       />
 
       {/* 2. CENTER PANEL: Main Conversation or Memory Bank */}
@@ -198,6 +245,7 @@ export const App: React.FC = () => {
             onOpenVoice={() => setVoicePanelOpen(true)}
             onOpenMobileMenu={() => setMobileMenuOpen(true)}
             onToggleVoicePanel={() => setVoicePanelOpen(!voicePanelOpen)}
+            suggestions={getDynamicSuggestions()}
             isAiTyping={isAiTyping}
           />
         )}

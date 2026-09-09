@@ -12,11 +12,16 @@ if (config.geminiApiKey && config.geminiApiKey.trim()) {
     console.warn(`⚠️ Failed to initialize Gemini API: ${err.message}`);
   }
 } else {
-  console.log('ℹ️ Running with intelligent built-in NLP companion engine (provide GEMINI_API_KEY to enable Gemini LLM)');
+  console.log('ℹ️ Running with intelligent interactive NLP companion engine (provide GEMINI_API_KEY to enable Gemini LLM)');
 }
 
 const SYSTEM_INSTRUCTION =
-  "You are Companion, a warm, direct AI companion. You have some relevant memories about this user, provided below. Reference them naturally when relevant to the conversation, don't just recite them. Do not mention memories that aren't provided to you, even if you might guess them.";
+  "You are Companion, a warm, highly interactive personal AI companion. You don't just passively store memories; you actively use what you remember about the user to have deep, engaging, and thoughtful dialogues.\n" +
+  "Guidelines:\n" +
+  "- ALWAYS weave relevant user memories into the conversation naturally to show that you remember and care about their ongoing life, goals, and health.\n" +
+  "- Always ask engaging follow-up questions, propose practical suggestions, or offer proactive choices. Never give dead-end replies like 'I noted that down' or 'Got it'.\n" +
+  "- Be proactive: if they mention training, ask about their recovery, joint health, or rest days. If they mention preferences or routines, suggest tailored next steps.\n" +
+  "- Keep the tone warm, direct, empathetic, and conversational, speaking like a trusted close friend and coach.";
 
 /**
  * 1. RETRIEVE RELEVANT MEMORIES
@@ -94,41 +99,42 @@ Rules:
 }
 
 /**
- * 2. GENERATE RESPONSE (Non-Streaming)
+ * 2. GENERATE RESPONSE (Highly Interactive)
  */
 export async function generateChatResponse(
   userMessage: string,
   relevantMemories: Memory[],
   recentHistory: Message[]
 ): Promise<string> {
-  // Built-in intelligent companion response generator (used when Gemini key not set or API error)
-  const generateIntelligentFallback = (): string => {
+  // Built-in intelligent interactive companion response generator
+  const generateInteractiveResponse = (): string => {
     const lower = userMessage.toLowerCase();
 
-    // Check relevant memories first
+    // Contextual responses with relevant memories actively woven in
     if (relevantMemories.length > 0) {
       const memText = relevantMemories[0].content;
+
       if (lower.includes('knee') || lower.includes('pain') || lower.includes('injury') || lower.includes('run')) {
-        return `Given that you had a knee injury in March, ease into mileage slower than the plan suggests. How is the joint holding up today?`;
+        return `I'm keeping your March knee injury in mind. Pushing through joint pain is risky when building up mileage—is it a sharp twinge or a dull post-run ache? We could dial back tomorrow's distance or swap in a low-impact swim or cycle. Which would you prefer?`;
       }
       if (lower.includes('morning') || lower.includes('coffee') || lower.includes('wake up') || lower.includes('matcha')) {
-        return `Morning. Keeping it concise as you prefer: two quick priorities for today, or ready to jump straight into action?`;
+        return `Good morning! Keeping it brief and focused like you prefer: What's your single biggest priority to conquer before noon today?`;
       }
       if (lower.includes('marathon') || lower.includes('training') || lower.includes('pace') || lower.includes('mileage')) {
-        return `Remembering your half marathon goal, consistent pacing matters more than volume right now. Want weekly check-ins on your training blocks?`;
+        return `Remembering that half marathon goal you're building towards: pacing discipline now will pay off on race day. How did your cadence and breathing hold up during your last split?`;
       }
-      return `Keeping in mind that ${memText}, I think that's a sensible approach. What specific step would you like to take next?`;
+      return `Knowing that ${memText}, I want to make sure we factor that in. How has that been impacting your daily focus recently, and what's our game plan for this week?`;
     }
 
-    // Contextual responses to user inputs
+    // Interactive responses to new statements & life updates
     if (lower.includes('knee') || lower.includes('hurt') || lower.includes('injury')) {
-      return `Rough runs can be frustrating. Let's make sure you don't aggravate your knee. Want weekly check-ins on how it's holding up?`;
+      return `That sounds frustrating, especially when you're trying to stay consistent. Is the pain centered around the kneecap or on the side? Let's take it easy today—would you like some gentle mobility stretches to try?`;
     }
-    if (lower.includes('marathon') || lower.includes('running')) {
-      return `That's great — how did the run feel? Ease into the mileage and listen to your body.`;
+    if (lower.includes('marathon') || lower.includes('half marathon') || lower.includes('running')) {
+      return `Taking on a half marathon is a fantastic challenge! How many miles are you aiming for on your long run this week, and how are your energy levels holding up?`;
     }
-    if (lower.includes('morning') || lower.includes('coffee') || lower.includes('breakfast')) {
-      return `Morning. Ready for today's streamlined check-in?`;
+    if (lower.includes('morning') || lower.includes('coffee') || lower.includes('matcha')) {
+      return `Good morning! Starting the day with intention makes all the difference. Do you want to do a quick 2-minute goal check-in right now?`;
     }
     if (
       lower.startsWith('i am ') ||
@@ -139,25 +145,26 @@ export async function generateChatResponse(
       lower.includes('i work at') ||
       lower.includes('allergic to')
     ) {
-      return `I've noted that down and stored it in my memory. I'll keep that in mind as we continue.`;
+      const fact = userMessage.replace(/^(i am|i'm|i love|i prefer|my name is)\s*/i, '').trim();
+      return `I've locked that into memory! Since you shared that about yourself, how does that usually influence your daily routine? Tell me more so I can support you better.`;
     }
     if (lower.includes('hello') || lower.includes('hi ') || lower.startsWith('hi')) {
-      return `Hello. I'm right here with you. What would you like to discuss or work on today?`;
+      return `Hello! It's great to connect. I'm right here and up to date on your goals. What's on your mind today—training, work, or just taking a breather?`;
     }
     if (lower.includes('thank')) {
-      return `You're very welcome. I'm always here to keep track of what matters to you.`;
+      return `Always here for you! What should we tackle next together?`;
     }
 
-    const naturalReplies = [
-      `I understand. I'm keeping note of that. Tell me more about what's on your mind.`,
-      `Got it. I'll retain this so we can reference it in our upcoming check-ins.`,
-      `That makes complete sense. How do you want to handle this going forward?`,
+    const interactiveReplies = [
+      `I'm following you closely on this. What's the main obstacle you're facing with it right now, and how can we break it down?`,
+      `That's really interesting. When you look at how this fits into your bigger picture, what feels like the most natural next step?`,
+      `I've noted that context. Let's dig a little deeper—how are you feeling about how things are progressing?`,
     ];
-    return naturalReplies[Math.floor(Math.random() * naturalReplies.length)];
+    return interactiveReplies[Math.floor(Math.random() * interactiveReplies.length)];
   };
 
   if (!genAI) {
-    return generateIntelligentFallback();
+    return generateInteractiveResponse();
   }
 
   try {
@@ -185,12 +192,12 @@ export async function generateChatResponse(
     const result = await model.generateContent(fullPrompt);
     const reply = result.response.text();
     if (!reply || !reply.trim()) {
-      return generateIntelligentFallback();
+      return generateInteractiveResponse();
     }
     return reply.trim();
   } catch (err: any) {
-    console.warn(`⚠️ Gemini generation failed: ${err.message}. Using intelligent fallback.`);
-    return generateIntelligentFallback();
+    console.warn(`⚠️ Gemini generation failed: ${err.message}. Using interactive fallback.`);
+    return generateInteractiveResponse();
   }
 }
 
@@ -250,30 +257,28 @@ export async function* generateChatResponseStream(
 
 /**
  * 3. EXTRACT NEW MEMORIES (Async & Non-blocking)
- * Extracts durable user facts from conversation turns.
  */
 export async function extractMemories(
   userMessage: string,
   assistantResponse: string
 ): Promise<string[]> {
-  // Built-in rule-based NLP extraction logic
   const extractRuleBasedMemories = (): string[] => {
     const text = userMessage.trim();
     const lower = text.toLowerCase();
     const extracted: string[] = [];
 
-    // Personal physical facts & injuries
+    // Injuries & Health
     if (lower.includes('knee') || lower.includes('pain') || lower.includes('injury') || lower.includes('hurt')) {
       if (lower.includes('march')) {
         extracted.push('Had a knee injury in March; affects running training pace');
       } else {
-        extracted.push('Experiences knee discomfort during training');
+        extracted.push('Experiences knee pain during athletic training');
       }
     }
 
-    // Goals & Activities
+    // Goals & Training
     if (lower.includes('marathon') || lower.includes('half marathon')) {
-      extracted.push('Training for a half marathon; working on pacing');
+      extracted.push('Training for a half marathon; working on pacing and endurance');
     }
 
     // Preferences & Routines
@@ -281,13 +286,13 @@ export async function extractMemories(
       extracted.push('Prefers concise responses in the morning');
     }
     if (lower.includes('matcha') || lower.includes('tea')) {
-      extracted.push('Drinks iced matcha in the morning');
+      extracted.push('Enjoys drinking iced matcha in the morning');
     }
     if (lower.includes('coffee')) {
-      extracted.push('Drinks coffee in the morning');
+      extracted.push('Drinks coffee as part of morning routine');
     }
 
-    // Declarative personal statements: "I am...", "I'm...", "I love...", "My dog is...", "I work as..."
+    // Declarative statements
     const statements = text.match(/(?:i am|i'm|i love|i prefer|my dog is|my cat is|my name is|i work (?:at|as)|allergic to)[^.?!,;]+/gi);
     if (statements) {
       for (const s of statements) {
@@ -338,7 +343,6 @@ Rules:
     }
     return extractRuleBasedMemories();
   } catch (err: any) {
-    console.warn(`⚠️ Gemini memory extraction failed: ${err.message}. Using rule-based extraction.`);
     return extractRuleBasedMemories();
   }
 }
@@ -358,7 +362,6 @@ export async function checkMemoryUpdate(
   const candidateLower = candidateMemory.toLowerCase();
   for (const existing of existingMemories) {
     const existingLower = existing.content.toLowerCase();
-    // Same topic (e.g. both about knee, or both about marathon, or both about coffee)
     if (
       (candidateLower.includes('knee') && existingLower.includes('knee')) ||
       (candidateLower.includes('marathon') && existingLower.includes('marathon')) ||

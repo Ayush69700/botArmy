@@ -9,6 +9,7 @@ interface ChatScreenProps {
   onOpenVoice: () => void;
   onOpenMobileMenu?: () => void;
   onToggleVoicePanel?: () => void;
+  suggestions?: string[];
   isAiTyping?: boolean;
 }
 
@@ -18,6 +19,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   onOpenVoice,
   onOpenMobileMenu,
   onToggleVoicePanel,
+  suggestions,
   isAiTyping = false,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -107,6 +109,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       <ChatInput
         onSendMessage={onSendMessage}
         onOpenVoice={onOpenVoice}
+        suggestions={suggestions}
         disabled={isAiTyping}
       />
     </div>
