@@ -118,21 +118,24 @@ export const App: React.FC = () => {
         result.assistantMessage,
       ]);
 
-      // Re-fetch updated memories in background after 2 seconds to capture extracted memories
-      setTimeout(async () => {
-        const freshMemories = await api.getMemories();
-        if (freshMemories && freshMemories.length > 0) {
-          setMemories(freshMemories);
+      // Instantly sync memories from backend, and check again after 1.2s for async extracted facts
+      const syncMemories = async () => {
+        const fresh = await api.getMemories();
+        if (fresh && fresh.length > 0) {
+          setMemories(fresh);
         }
-      }, 2000);
+      };
+
+      await syncMemories();
+      setTimeout(syncMemories, 1200);
     } catch (err) {
       console.warn('Backend chat API failed, using fallback handler:', err);
 
-      // Graceful local fallback if backend is momentarily restarting
       const aiMsg: Message = {
         id: `msg-${Date.now() + 1}`,
         sender: 'ai',
-        text: "I've noted that down and remembered it for our upcoming conversations.",
+        text: "I've noted that down and remembered it for our upcoming check-ins.",
+        memoryRecall: memories.length > 0 ? `remembered: ${memories[0].text.slice(0, 28)}` : undefined,
       };
       setMessages((prev) => [...prev, aiMsg]);
     } finally {
@@ -170,19 +173,8 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleVoiceSpoken = (userText: string, aiReply: string, memoryRecall?: string) => {
-    const userMsg: Message = {
-      id: `msg-${Date.now()}`,
-      sender: 'user',
-      text: userText,
-    };
-    const aiMsg: Message = {
-      id: `msg-${Date.now() + 1}`,
-      sender: 'ai',
-      text: aiReply,
-      memoryRecall,
-    };
-    setMessages((prev) => [...prev, userMsg, aiMsg]);
+  const handleVoiceSpoken = (userText: string) => {
+    handleSendMessage(userText);
   };
 
   return (
