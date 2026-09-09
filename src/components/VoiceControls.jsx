@@ -5,7 +5,8 @@ export default function VoiceControls({
   onTranscriptReady,
   ttsEnabled,
   onToggleTts,
-  isProcessing
+  isProcessing,
+  isDark = true
 }) {
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(true);
@@ -42,7 +43,7 @@ export default function VoiceControls({
     };
 
     recognition.onerror = (event) => {
-      console.warn('[VoiceControls] Speech recognition event:', event.error);
+      console.warn('[VoiceControls] Speech error:', event.error);
       if (event.error === 'not-allowed') {
         shouldListenRef.current = false;
         setIsListening(false);
@@ -50,13 +51,10 @@ export default function VoiceControls({
     };
 
     recognition.onend = () => {
-      // If user has NOT manually toggled it off, keep listening continuously
       if (shouldListenRef.current) {
         try {
           recognition.start();
-        } catch (e) {
-          // Already running or starting
-        }
+        } catch (e) {}
       } else {
         setIsListening(false);
       }
@@ -64,7 +62,6 @@ export default function VoiceControls({
 
     recognitionRef.current = recognition;
 
-    // Track speechSynthesis state
     const interval = setInterval(() => {
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         setSpeechActive(window.speechSynthesis.speaking);
@@ -82,12 +79,11 @@ export default function VoiceControls({
 
   const toggleListening = () => {
     if (!isSupported || !recognitionRef.current) {
-      alert("Browser Speech Recognition is not supported in this browser. Please use Chrome or Edge, or type in the chat box!");
+      alert("Browser Speech Recognition is not supported in this browser. Please use Chrome or Edge!");
       return;
     }
 
     if (isListening) {
-      // User manually clicked to STOP listening -> finalize and send text
       shouldListenRef.current = false;
       try {
         recognitionRef.current.stop();
@@ -102,7 +98,6 @@ export default function VoiceControls({
       accumulatedTextRef.current = '';
       setLiveTranscript('');
     } else {
-      // User clicked to START manual listening
       if (window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
@@ -127,62 +122,58 @@ export default function VoiceControls({
   };
 
   return (
-    <div className="flex items-center gap-1.5">
-      {/* Mic Status Indicator when listening */}
+    <div className="flex items-center gap-2">
+      {/* Live recording pill */}
       {isListening && (
-        <div className="flex items-center gap-1 px-2 py-1 bg-[#8C1D40] border border-[#FF7A00] text-[#FFF1D6] text-[10px] font-mono animate-pulse">
-          <span className="w-1.5 h-1.5 bg-[#FFB000]"></span>
+        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-red-600 text-white text-xs font-mono animate-pulse">
+          <span className="w-2 h-2 rounded-full bg-white"></span>
           <span>LISTENING (Click mic to stop)</span>
         </div>
       )}
 
-      {/* Speech Recognition Toggle */}
+      {/* Mic toggle button */}
       <button
         type="button"
         onClick={toggleListening}
         disabled={isProcessing}
-        title={
-          !isSupported
-            ? 'Speech recognition not supported in this browser'
-            : isListening
-            ? 'Click to stop listening and send'
-            : 'Click to start listening'
-        }
-        className={`relative flex items-center justify-center w-8 h-8 rounded-none border transition-all duration-150 ${
+        title={isListening ? 'Click to stop listening and send' : 'Click to start continuous listening'}
+        className={`relative flex items-center justify-center w-8 h-8 rounded-none border transition ${
           isListening
-            ? 'bg-[#E84A27] text-[#FFF1D6] border-[#FFB000] ring-1 ring-[#FFB000]'
-            : isSupported
-            ? 'bg-[#1A1614] hover:bg-[#2E2420] text-[#FFF1D6] border-[#2E2420] hover:border-[#FF7A00]'
-            : 'bg-[#12100E] text-[#8A7A70] border-[#2E2420] cursor-not-allowed'
+            ? 'bg-red-600 text-white border-red-700'
+            : isDark
+            ? 'bg-[#2A2A2A] hover:bg-[#333] text-[#ECECEC] border-[#383838]'
+            : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
         }`}
       >
-        {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+        {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
       </button>
 
-      {/* Text-To-Speech Mute/Unmute Toggle */}
+      {/* TTS Toggle */}
       <button
         type="button"
         onClick={onToggleTts}
-        title={ttsEnabled ? 'Voice output enabled (click to mute)' : 'Voice output muted (click to enable)'}
-        className={`flex items-center justify-center w-8 h-8 rounded-none border transition-all duration-150 ${
+        title={ttsEnabled ? 'Voice response enabled' : 'Voice response muted'}
+        className={`flex items-center justify-center w-8 h-8 rounded-none border transition ${
           ttsEnabled
-            ? 'bg-[#1A1614] text-[#FFB000] border-[#FF7A00]/50 hover:bg-[#2E2420]'
-            : 'bg-[#12100E] text-[#8A7A70] border-[#2E2420] hover:text-[#FFF1D6]'
+            ? 'bg-blue-600 text-white border-blue-600'
+            : isDark
+            ? 'bg-[#2A2A2A] text-slate-400 border-[#383838]'
+            : 'bg-slate-100 text-slate-400 border-slate-300'
         }`}
       >
-        {ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+        {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
       </button>
 
-      {/* Stop Speaking Button (when active) */}
+      {/* Stop Speaking */}
       {speechActive && (
         <button
           type="button"
           onClick={handleStopSpeaking}
-          title="Stop reading response"
-          className="flex items-center gap-1 px-2 h-8 rounded-none bg-[#8C1D40] text-[#FFF1D6] border border-[#FF7A00] text-[11px] font-medium"
+          title="Stop voice playback"
+          className="flex items-center gap-1 px-2.5 h-8 bg-amber-600 text-white border border-amber-700 text-xs font-medium"
         >
-          <Square className="w-2.5 h-2.5 fill-current" />
-          <span>Stop Voice</span>
+          <Square className="w-3 h-3 fill-current" />
+          <span>Stop</span>
         </button>
       )}
     </div>

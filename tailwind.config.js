@@ -4,20 +4,30 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+      },
       colors: {
-        warm: {
-          gold: '#FFB000',
-          orange: '#FF7A00',
-          flame: '#E84A27',
-          maroon: '#8C1D40',
-          cream: '#FFF1D6',
-          dark: '#12100E',
-          card: '#1A1614',
-          border: '#2E2420',
-          muted: '#8A7A70',
+        gpt: {
+          bg: '#212121',
+          surface: '#181818',
+          card: '#2F2F2F',
+          border: '#383838',
+          subtle: '#424242',
+          text: '#ECECEC',
+          muted: '#B4B4B4',
         },
+        aesthetic: {
+          blue: '#2563EB',
+          blueLight: '#3B82F6',
+          blueHover: '#1D4ED8',
+          ice: '#EFF6FF',
+          iceBorder: '#BFDBFE',
+        }
       },
     },
   },

@@ -7,12 +7,14 @@ import {
   ShieldAlert,
   Sliders,
   CheckCircle2,
-  X
+  X,
+  Sun,
+  Moon,
+  Layers
 } from 'lucide-react';
 
 import ChatWindow from './components/ChatWindow.jsx';
-import MemoryPanel from './components/MemoryPanel.jsx';
-import EfficiencyComparison from './components/EfficiencyComparison.jsx';
+import ContextWindowPanel from './components/ContextWindowPanel.jsx';
 
 import {
   getMemories,
@@ -34,37 +36,101 @@ import {
   clearAllDatabase
 } from './lib/indexedDB.js';
 
+const MSG_STORAGE_KEY = 'ps4_companion_messages_v2';
+
 export default function App() {
-  // Chat state
-  const [messages, setMessages] = useState([]);
+  // Theme state: dark (ChatGPT/Claude grey) or light (crisp white + aesthetic blue)
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem('ps4_theme') !== 'light';
+    }
+    return true;
+  });
+
+  // Synchronous initial load of chat messages from localStorage
+  const [messages, setMessages] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const cached = window.localStorage.getItem(MSG_STORAGE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
-  const [turnCount, setTurnCount] = useState(0);
+  const [turnCount, setTurnCount] = useState(() => messages.filter(m => m.role === 'user').length);
   const [lastExtracted, setLastExtracted] = useState(null);
+  const [latestUsedMemories, setLatestUsedMemories] = useState([]);
 
   // Store state
-  const [memories, setMemories] = useState([]);
+  const [memories, setMemories] = useState(() => getMemories());
   const [efficiencyHistory, setEfficiencyHistory] = useState([]);
 
   // Modals & Settings
   const [showSettings, setShowSettings] = useState(false);
   const [showHonestAnswer, setShowHonestAnswer] = useState(false);
 
-  // LLM Config
-  const [apiKey, setApiKey] = useState(() => import.meta.env.VITE_LLM_API_KEY || localStorage.getItem('ps4_companion_api_key') || '');
-  const [baseUrl, setBaseUrl] = useState(() => import.meta.env.VITE_LLM_BASE_URL || localStorage.getItem('ps4_companion_base_url') || 'https://generativelanguage.googleapis.com/v1beta/openai');
-  const [model, setModel] = useState(() => import.meta.env.VITE_LLM_MODEL || localStorage.getItem('ps4_companion_model') || 'gemini-3.6-flash');
+  // LLM Config (defaults to user's Groq key with gpt-oss-120b)
+  const [apiKey, setApiKey] = useState(() => {
+    const envKey = import.meta.env.VITE_LLM_API_KEY;
+    const storedKey = typeof window !== 'undefined' ? localStorage.getItem('ps4_companion_api_key') : null;
+    return envKey || storedKey || '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';
+  });
+
+  const [baseUrl, setBaseUrl] = useState(() => {
+    const activeKey = import.meta.env.VITE_LLM_API_KEY || (typeof window !== 'undefined' ? localStorage.getItem('ps4_companion_api_key') : '') || 'gsk_';
+    const envBase = import.meta.env.VITE_LLM_BASE_URL;
+    const storedBase = typeof window !== 'undefined' ? localStorage.getItem('ps4_companion_base_url') : null;
+    if (activeKey.startsWith('gsk_')) {
+      return 'https://api.groq.com/openai/v1';
+    }
+    return envBase || storedBase || 'https://api.groq.com/openai/v1';
+  });
+
+  const [model, setModel] = useState(() => {
+    const activeKey = import.meta.env.VITE_LLM_API_KEY || (typeof window !== 'undefined' ? localStorage.getItem('ps4_companion_api_key') : '') || 'gsk_';
+    const envModel = import.meta.env.VITE_LLM_MODEL;
+    const storedModel = typeof window !== 'undefined' ? localStorage.getItem('ps4_companion_model') : null;
+    if (activeKey.startsWith('gsk_')) {
+      if (storedModel && (storedModel === 'openai/gpt-oss-120b' || storedModel === 'openai/gpt-oss-20b')) {
+        return storedModel;
+      }
+      return 'openai/gpt-oss-120b';
+    }
+    return envModel || storedModel || 'openai/gpt-oss-120b';
+  });
   const [simulateFailure, setSimulateFailure] = useState(false);
+
+  // Apply dark/light class to html document
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('ps4_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('ps4_theme', 'light');
+    }
+  }, [isDark]);
+
+  const toggleTheme = () => {
+    setIsDark(!isDark);
+  };
 
   // Sync memory store, efficiency history, and messages via IndexedDB
   useEffect(() => {
-    // Load persisted chat transcript from IndexedDB
+    // Load from IndexedDB and merge if available
     getAllMessagesFromDB().then((savedMsgs) => {
-      if (savedMsgs && savedMsgs.length > 0) {
+      if (savedMsgs && savedMsgs.length > messages.length) {
         setMessages(savedMsgs);
-        // Compute current turn count from user messages
-        const userMsgCount = savedMsgs.filter(m => m.role === 'user').length;
-        setTurnCount(userMsgCount);
+        setTurnCount(savedMsgs.filter(m => m.role === 'user').length);
+        try {
+          localStorage.setItem(MSG_STORAGE_KEY, JSON.stringify(savedMsgs));
+        } catch (e) {}
       }
     });
 
@@ -114,6 +180,17 @@ export default function App() {
     }
   };
 
+  // Helper to persist message list to both LocalStorage and IndexedDB
+  const saveMessagesState = (newMessagesList, newMsgToAppend) => {
+    setMessages(newMessagesList);
+    try {
+      localStorage.setItem(MSG_STORAGE_KEY, JSON.stringify(newMessagesList));
+    } catch (e) {}
+    if (newMsgToAppend) {
+      putMessageInDB(newMsgToAppend).catch(() => {});
+    }
+  };
+
   // Core Turn Execution
   const handleSendMessage = useCallback(async (userText) => {
     if (!userText || !userText.trim() || isProcessing) return;
@@ -128,12 +205,13 @@ export default function App() {
       timestamp: Date.now()
     };
 
-    const updatedMessages = [...messages, userMessageObj];
-    setMessages(updatedMessages);
-    putMessageInDB(userMessageObj).catch(() => {});
+    const updatedWithUser = [...messages, userMessageObj];
+    saveMessagesState(updatedWithUser, userMessageObj);
 
-    // Retrieve top 5
+    // Retrieve top 5 memories
     const top5 = retrieveTop5Memories(userText);
+    const top5Strings = top5.map(m => (typeof m === 'string' ? m : m.content));
+    setLatestUsedMemories(top5Strings);
 
     const apiConfig = {
       apiKey: apiKey.trim(),
@@ -158,15 +236,15 @@ export default function App() {
         timestamp: Date.now()
       };
 
-      setMessages(prev => [...prev, assistantMessageObj]);
-      putMessageInDB(assistantMessageObj).catch(() => {});
+      const finalMessages = [...updatedWithUser, assistantMessageObj];
+      saveMessagesState(finalMessages, assistantMessageObj);
       speakText(chatResult.reply);
 
       // Record real Token Efficiency metrics
       recordTurnEfficiency({
         turn: currentTurn,
         systemPrompt: COMPANION_SYSTEM_PROMPT,
-        fullHistory: messages,
+        fullHistory: updatedWithUser,
         top5Memories: top5,
         currentMessage: userText
       });
@@ -193,10 +271,14 @@ export default function App() {
   }, [messages, isProcessing, turnCount, apiKey, baseUrl, model, simulateFailure, ttsEnabled]);
 
   const handleResetSession = () => {
-    if (window.confirm("Reset conversation, memories, and token efficiency history?")) {
+    if (window.confirm("Reset conversation, memories, and token efficiency metrics?")) {
       setMessages([]);
       setTurnCount(0);
       setLastExtracted(null);
+      setLatestUsedMemories([]);
+      try {
+        localStorage.removeItem(MSG_STORAGE_KEY);
+      } catch (e) {}
       clearMemories();
       clearEfficiencyHistory();
       clearAllDatabase().catch(() => {});
@@ -206,74 +288,109 @@ export default function App() {
     }
   };
 
+  // Base background and text classes
+  const appBg = isDark ? 'bg-[#181818] text-[#ECECEC]' : 'bg-[#F8FAFC] text-slate-900';
+  const headerBg = isDark ? 'bg-[#212121] border-[#383838]' : 'bg-white border-slate-200';
+  const textMuted = isDark ? 'text-[#B4B4B4]' : 'text-slate-500';
+
   return (
-    <div className="flex flex-col h-screen bg-[#12100E] text-[#FFF1D6] overflow-hidden font-sans">
+    <div className={`flex flex-col h-screen ${appBg} overflow-hidden font-sans transition-colors duration-150`}>
       {/* Top Navbar */}
-      <header className="h-12 border-b border-[#2E2420] bg-[#171311] px-3.5 flex items-center justify-between shrink-0 z-10">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-[#8C1D40] border border-[#E84A27] flex items-center justify-center text-[#FFB000]">
+      <header className={`h-14 border-b ${headerBg} px-4 flex items-center justify-between shrink-0 z-10 shadow-sm`}>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-blue-600 flex items-center justify-center text-white font-bold">
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <div className="flex items-center gap-1.5 leading-none">
-              <h1 className="font-bold text-[#FFF1D6] tracking-wide text-xs uppercase">
+            <div className="flex items-center gap-2 leading-none flex-wrap">
+              <h1 className="font-bold tracking-tight text-sm uppercase">
                 PS4 Voice Memory Companion
               </h1>
-              <span className="text-[9px] font-mono px-1 py-0.2 bg-[#FF7A00]/10 text-[#FF7A00] border border-[#FF7A00]/40">
-                v1.0
+              <span className="text-xs font-mono px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900">
+                Persistent DB
               </span>
-              <span className="hidden sm:inline text-[9px] font-mono px-1 py-0.2 bg-[#8C1D40]/30 text-[#FFB000] border border-[#8C1D40]">
-                Chromium DB
+              <span className={`hidden sm:inline-flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 border ${
+                baseUrl.includes('groq')
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                  : baseUrl.includes('google')
+                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                  : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${baseUrl.includes('groq') ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
+                {baseUrl.includes('groq') ? 'Groq' : baseUrl.includes('google') ? 'Gemini' : 'OpenAI'}: {model.split('/').pop()}
               </span>
             </div>
-            <p className="text-[9px] text-[#8A7A70] leading-none mt-0.5">
-              "Remembers what matters using a fraction of the context"
+            <p className={`text-xs ${textMuted} mt-0.5`}>
+              Remembers what matters using a fraction of the context
             </p>
           </div>
         </div>
 
-        {/* Action Badges and Settings */}
-        <div className="flex items-center gap-1.5">
+        {/* Action Controls */}
+        <div className="flex items-center gap-2">
           {simulateFailure && (
-            <div className="flex items-center gap-1 px-2 py-0.5 bg-[#8C1D40] border border-[#E84A27] text-[#FFF1D6] text-[10px]">
-              <ShieldAlert className="w-3 h-3 text-[#FFB000]" />
+            <div className="flex items-center gap-1 px-2 py-1 bg-red-500/10 border border-red-500/30 text-red-500 text-xs">
+              <ShieldAlert className="w-3.5 h-3.5" />
               <span>Forced Fallback</span>
             </div>
           )}
 
+          {/* Theme Invert Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border text-xs font-medium transition rounded-none ${
+              isDark
+                ? 'bg-[#2A2A2A] hover:bg-[#333] text-amber-300 border-[#383838]'
+                : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+            }`}
+          >
+            {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{isDark ? 'Light Mode' : 'Dark Mode'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setShowHonestAnswer(true)}
-            className="hidden sm:flex items-center gap-1 px-2 py-1 bg-[#1A1614] hover:bg-[#2E2420] text-[#FFF1D6] border border-[#2E2420] hover:border-[#FF7A00] text-[10px] font-mono uppercase transition rounded-none"
+            className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 border text-xs font-mono uppercase transition rounded-none ${
+              isDark
+                ? 'bg-[#2A2A2A] hover:bg-[#333] text-[#ECECEC] border-[#383838]'
+                : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+            }`}
           >
-            <Info className="w-3 h-3 text-[#FFB000]" />
-            <span>Honest Benchmark</span>
+            <Info className="w-3.5 h-3.5 text-blue-500" />
+            <span>Benchmark Info</span>
           </button>
 
           <button
             type="button"
             onClick={handleResetSession}
-            title="Reset conversation"
-            className="flex items-center gap-1 px-2 py-1 bg-[#1A1614] hover:bg-[#2E2420] text-[#FFF1D6] border border-[#2E2420] hover:border-[#E84A27] text-[10px] font-mono uppercase transition rounded-none"
+            title="Reset conversation and persistent DB"
+            className={`flex items-center gap-1.5 px-3 py-1.5 border text-xs font-mono uppercase transition rounded-none ${
+              isDark
+                ? 'bg-[#2A2A2A] hover:bg-rose-950/40 text-[#ECECEC] hover:text-rose-400 border-[#383838]'
+                : 'bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-600 border-slate-300'
+            }`}
           >
-            <RotateCcw className="w-3 h-3" />
-            <span className="hidden md:inline">Reset</span>
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Reset</span>
           </button>
 
           <button
             type="button"
             onClick={() => setShowSettings(true)}
-            className="flex items-center gap-1 px-2 py-1 bg-[#1A1614] hover:bg-[#2E2420] text-[#FFB000] border border-[#2E2420] hover:border-[#FFB000] text-[10px] font-mono uppercase transition rounded-none"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition rounded-none shadow-sm"
           >
-            <Settings className="w-3 h-3" />
+            <Settings className="w-3.5 h-3.5" />
             <span>Settings</span>
           </button>
         </div>
       </header>
 
-      {/* Main Content: Thin padding, boxy grid */}
-      <main className="flex-1 p-2 lg:p-2.5 grid grid-cols-1 lg:grid-cols-12 gap-2 overflow-hidden bg-[#12100E]">
-        {/* Left Column: Chat Window */}
+      {/* Main Content Layout: Left = Chat Window, Right = Unified Context Window Panel */}
+      <main className="flex-1 p-3 grid grid-cols-1 lg:grid-cols-12 gap-3 overflow-hidden">
+        {/* Left Column: Chat Window (takes 7 columns) */}
         <div className="lg:col-span-7 h-full flex flex-col min-h-0">
           <ChatWindow
             messages={messages}
@@ -281,66 +398,100 @@ export default function App() {
             isProcessing={isProcessing}
             ttsEnabled={ttsEnabled}
             onToggleTts={() => setTtsEnabled(!ttsEnabled)}
+            isDark={isDark}
           />
         </div>
 
-        {/* Right Column: Memory + Efficiency */}
-        <div className="lg:col-span-5 h-full flex flex-col gap-2 min-h-0">
-          {/* Top: Memory Storage */}
-          <div className="flex-1 min-h-0">
-            <MemoryPanel
-              memories={memories}
-              lastExtracted={lastExtracted}
-              onManualRefresh={() => {
-                setMemories(getMemories());
-              }}
-            />
-          </div>
-
-          {/* Bottom: Efficiency Comparison */}
-          <div className="flex-1 min-h-0">
-            <EfficiencyComparison efficiencyHistory={efficiencyHistory} />
-          </div>
+        {/* Right Column: Unified Single Section Context Window Panel (takes 5 columns) */}
+        <div className="lg:col-span-5 h-full flex flex-col min-h-0">
+          <ContextWindowPanel
+            memories={memories}
+            efficiencyHistory={efficiencyHistory}
+            lastExtracted={lastExtracted}
+            latestUsedMemories={latestUsedMemories}
+            onManualRefresh={() => {
+              setMemories(getMemories());
+            }}
+            isDark={isDark}
+          />
         </div>
       </main>
 
-      {/* Settings Modal (Boxy & Warm) */}
+      {/* Settings Modal */}
       {showSettings && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-none flex items-center justify-center p-3">
-          <div className="w-full max-w-sm bg-[#1A1614] border border-[#2E2420] shadow-none overflow-hidden rounded-none">
-            <div className="px-3.5 py-2.5 border-b border-[#2E2420] bg-[#171311] flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <Sliders className="w-4 h-4 text-[#FFB000]" />
-                <h3 className="font-semibold text-xs text-[#FFF1D6] uppercase tracking-wide">
-                  LLM API Configuration
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3">
+          <div className={`w-full max-w-md border shadow-xl overflow-hidden rounded-none ${
+            isDark ? 'bg-[#212121] border-[#383838] text-[#ECECEC]' : 'bg-white border-slate-300 text-slate-900'
+          }`}>
+            <div className={`px-4 py-3 border-b flex items-center justify-between ${
+              isDark ? 'bg-[#1E1E1E] border-[#383838]' : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-blue-600" />
+                <h3 className="font-semibold text-sm uppercase tracking-wide">
+                  Model & API Config
                 </h3>
               </div>
               <button
                 onClick={() => setShowSettings(false)}
-                className="text-[#8A7A70] hover:text-[#FFF1D6]"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveSettings} className="p-3.5 space-y-3 text-xs">
+            <form onSubmit={handleSaveSettings} className="p-4 space-y-3.5 text-xs">
               {/* Presets */}
               <div className="space-y-1">
-                <label className="text-[10px] font-mono uppercase text-[#8A7A70]">Quick Presets</label>
-                <div className="grid grid-cols-3 gap-1">
+                <label className={`text-xs font-mono uppercase ${textMuted}`}>Quick Presets</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBaseUrl('https://api.groq.com/openai/v1');
+                      setModel('openai/gpt-oss-120b');
+                    }}
+                    className={`px-1.5 py-1.5 text-[11px] font-mono uppercase border text-center transition rounded-none ${
+                      model === 'openai/gpt-oss-120b'
+                        ? 'bg-blue-600 text-white border-blue-600 font-semibold'
+                        : isDark
+                        ? 'bg-[#2A2A2A] text-slate-300 border-[#383838]'
+                        : 'bg-slate-100 text-slate-700 border-slate-300'
+                    }`}
+                  >
+                    Groq 120B
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBaseUrl('https://api.groq.com/openai/v1');
+                      setModel('openai/gpt-oss-20b');
+                    }}
+                    className={`px-1.5 py-1.5 text-[11px] font-mono uppercase border text-center transition rounded-none ${
+                      model === 'openai/gpt-oss-20b'
+                        ? 'bg-blue-600 text-white border-blue-600 font-semibold'
+                        : isDark
+                        ? 'bg-[#2A2A2A] text-slate-300 border-[#383838]'
+                        : 'bg-slate-100 text-slate-700 border-slate-300'
+                    }`}
+                  >
+                    Groq 20B
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
                       setBaseUrl('https://generativelanguage.googleapis.com/v1beta/openai');
-                      setModel('gemini-3.6-flash');
+                      setModel('gemini-3.5-flash-lite');
                     }}
-                    className={`px-1.5 py-1 text-[10px] font-mono uppercase border text-center transition rounded-none ${
+                    className={`px-1.5 py-1.5 text-[11px] font-mono uppercase border text-center transition rounded-none ${
                       model.includes('gemini')
-                        ? 'bg-[#8C1D40] text-[#FFF1D6] border-[#FF7A00]'
-                        : 'bg-[#12100E] text-[#8A7A70] border-[#2E2420] hover:text-[#FFF1D6]'
+                        ? 'bg-blue-600 text-white border-blue-600 font-semibold'
+                        : isDark
+                        ? 'bg-[#2A2A2A] text-slate-300 border-[#383838]'
+                        : 'bg-slate-100 text-slate-700 border-slate-300'
                     }`}
                   >
-                    Gemini Flash
+                    Gemini Lite
                   </button>
                   <button
                     type="button"
@@ -348,33 +499,21 @@ export default function App() {
                       setBaseUrl('https://api.openai.com/v1');
                       setModel('gpt-4o-mini');
                     }}
-                    className={`px-1.5 py-1 text-[10px] font-mono uppercase border text-center transition rounded-none ${
+                    className={`px-1.5 py-1.5 text-[11px] font-mono uppercase border text-center transition rounded-none ${
                       model === 'gpt-4o-mini'
-                        ? 'bg-[#8C1D40] text-[#FFF1D6] border-[#FF7A00]'
-                        : 'bg-[#12100E] text-[#8A7A70] border-[#2E2420] hover:text-[#FFF1D6]'
+                        ? 'bg-blue-600 text-white border-blue-600 font-semibold'
+                        : isDark
+                        ? 'bg-[#2A2A2A] text-slate-300 border-[#383838]'
+                        : 'bg-slate-100 text-slate-700 border-slate-300'
                     }`}
                   >
-                    OpenAI 4o-m
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBaseUrl('https://api.groq.com/openai/v1');
-                      setModel('llama-3.3-70b-versatile');
-                    }}
-                    className={`px-1.5 py-1 text-[10px] font-mono uppercase border text-center transition rounded-none ${
-                      model.includes('llama')
-                        ? 'bg-[#8C1D40] text-[#FFF1D6] border-[#FF7A00]'
-                        : 'bg-[#12100E] text-[#8A7A70] border-[#2E2420] hover:text-[#FFF1D6]'
-                    }`}
-                  >
-                    Groq Llama
+                    OpenAI
                   </button>
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-mono uppercase text-[#8A7A70]">
+                <label className={`text-xs font-mono uppercase ${textMuted}`}>
                   API Key
                 </label>
                 <input
@@ -382,49 +521,70 @@ export default function App() {
                   value={apiKey}
                   onChange={(e) => {
                     const val = e.target.value;
+                    const trimmed = val.trim();
                     setApiKey(val);
-                    if (val.trim().startsWith('AIzaSy') || val.trim().startsWith('AQ.')) {
+                    if (trimmed.startsWith('gsk_')) {
+                      setBaseUrl('https://api.groq.com/openai/v1');
+                      setModel('openai/gpt-oss-120b');
+                    } else if (trimmed.startsWith('AIzaSy') || trimmed.startsWith('AQ.')) {
                       setBaseUrl('https://generativelanguage.googleapis.com/v1beta/openai');
-                      setModel('gemini-3.6-flash');
+                      setModel('gemini-3.5-flash-lite');
+                    } else if (trimmed.startsWith('sk-')) {
+                      setBaseUrl('https://api.openai.com/v1');
+                      setModel('gpt-4o-mini');
                     }
                   }}
-                  placeholder="Paste Gemini or OpenAI key..."
-                  className="w-full bg-[#12100E] border border-[#2E2420] px-2.5 py-1.5 text-xs text-[#FFF1D6] placeholder-[#8A7A70] focus:outline-none focus:border-[#FF7A00] font-mono rounded-none"
+                  placeholder="Paste Groq (gsk_...), Gemini, or OpenAI key..."
+                  className={`w-full border px-3 py-2 text-xs font-mono focus:outline-none focus:border-blue-600 rounded-none ${
+                    isDark
+                      ? 'bg-[#181818] border-[#383838] text-[#ECECEC]'
+                      : 'bg-white border-slate-300 text-slate-900'
+                  }`}
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-mono uppercase text-[#8A7A70]">
+                <label className={`text-xs font-mono uppercase ${textMuted}`}>
                   Base URL
                 </label>
                 <input
                   type="text"
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
-                  className="w-full bg-[#12100E] border border-[#2E2420] px-2.5 py-1.5 text-[11px] text-[#FFF1D6] placeholder-[#8A7A70] focus:outline-none focus:border-[#FF7A00] font-mono rounded-none"
+                  className={`w-full border px-3 py-2 text-xs font-mono focus:outline-none focus:border-blue-600 rounded-none ${
+                    isDark
+                      ? 'bg-[#181818] border-[#383838] text-[#ECECEC]'
+                      : 'bg-white border-slate-300 text-slate-900'
+                  }`}
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-mono uppercase text-[#8A7A70]">
+                <label className={`text-xs font-mono uppercase ${textMuted}`}>
                   Model
                 </label>
                 <input
                   type="text"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  className="w-full bg-[#12100E] border border-[#2E2420] px-2.5 py-1.5 text-[11px] text-[#FFF1D6] placeholder-[#8A7A70] focus:outline-none focus:border-[#FF7A00] font-mono rounded-none"
+                  className={`w-full border px-3 py-2 text-xs font-mono focus:outline-none focus:border-blue-600 rounded-none ${
+                    isDark
+                      ? 'bg-[#181818] border-[#383838] text-[#ECECEC]'
+                      : 'bg-white border-slate-300 text-slate-900'
+                  }`}
                 />
               </div>
 
               {/* Broken Key Toggle */}
-              <div className="pt-1 border-t border-[#2E2420]">
-                <label className="flex items-center justify-between cursor-pointer p-2 bg-[#12100E] border border-[#2E2420] rounded-none">
+              <div className="pt-2 border-t dark:border-[#383838] border-slate-200">
+                <label className={`flex items-center justify-between cursor-pointer p-2.5 border rounded-none ${
+                  isDark ? 'bg-[#181818] border-[#383838]' : 'bg-slate-50 border-slate-200'
+                }`}>
                   <div>
-                    <span className="text-[11px] text-[#FFF1D6] block">
+                    <span className="text-xs font-medium block">
                       Simulate Broken API Key
                     </span>
-                    <span className="text-[9px] text-[#8A7A70] block">
+                    <span className={`text-[10px] block ${textMuted}`}>
                       Forces local fallback response
                     </span>
                   </div>
@@ -432,24 +592,24 @@ export default function App() {
                     type="checkbox"
                     checked={simulateFailure}
                     onChange={(e) => setSimulateFailure(e.target.checked)}
-                    className="accent-[#E84A27] cursor-pointer"
+                    className="accent-blue-600 cursor-pointer"
                   />
                 </label>
               </div>
 
-              <div className="pt-2 flex items-center justify-end gap-1.5">
+              <div className="pt-2 flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowSettings(false)}
-                  className="px-2.5 py-1 text-[#8A7A70] hover:text-[#FFF1D6] text-xs font-mono uppercase"
+                  className={`px-3 py-1.5 text-xs font-mono uppercase ${textMuted} hover:${isDark ? 'text-white' : 'text-black'}`}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-3 py-1 bg-[#E84A27] hover:bg-[#FF7A00] text-[#FFF1D6] border border-[#FFB000] font-semibold text-xs font-mono uppercase transition rounded-none"
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs font-mono uppercase transition rounded-none shadow-sm"
                 >
-                  Save
+                  Save Settings
                 </button>
               </div>
             </form>
@@ -457,49 +617,59 @@ export default function App() {
         </div>
       )}
 
-      {/* Honest Answer Modal (Boxy & Warm) */}
+      {/* Honest Answer Modal */}
       {showHonestAnswer && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3">
-          <div className="w-full max-w-md bg-[#1A1614] border border-[#2E2420] shadow-none overflow-hidden rounded-none">
-            <div className="px-3.5 py-2.5 border-b border-[#2E2420] bg-[#171311] flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[#FFB000]" />
-                <h3 className="font-semibold text-xs text-[#FFF1D6] uppercase tracking-wide">
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3">
+          <div className={`w-full max-w-md border shadow-xl overflow-hidden rounded-none ${
+            isDark ? 'bg-[#212121] border-[#383838] text-[#ECECEC]' : 'bg-white border-slate-300 text-slate-900'
+          }`}>
+            <div className={`px-4 py-3 border-b flex items-center justify-between ${
+              isDark ? 'bg-[#1E1E1E] border-[#383838]' : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                <h3 className="font-semibold text-sm uppercase tracking-wide">
                   Judge & Team Reference
                 </h3>
               </div>
               <button
                 onClick={() => setShowHonestAnswer(false)}
-                className="text-[#8A7A70] hover:text-[#FFF1D6]"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-3.5 space-y-2.5 text-xs text-[#FFF1D6]/90 leading-relaxed">
-              <div className="p-2.5 bg-[#12100E] border border-[#2E2420]">
-                <strong className="text-[#FFB000] block uppercase tracking-wider text-[9px] mb-0.5">
+            <div className="p-4 space-y-3 text-xs leading-relaxed">
+              <div className={`p-3 border ${
+                isDark ? 'bg-[#181818] border-[#383838]' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <strong className="text-blue-600 dark:text-blue-400 block uppercase tracking-wider text-[10px] mb-1">
                   The North Star Pitch:
                 </strong>
-                <p className="italic text-[11px]">
+                <p className="italic text-xs font-medium">
                   "Most assistants forget you the moment the session ends — this one remembers what matters, and does it using a fraction of the context."
                 </p>
               </div>
 
-              <div className="p-2.5 bg-[#8C1D40]/20 border border-[#8C1D40]">
-                <strong className="text-[#FF7A00] block uppercase tracking-wider text-[9px] mb-0.5">
-                  The Agreed Honest Answer:
+              <div className={`p-3 border ${
+                isDark ? 'bg-blue-950/20 border-blue-900/60' : 'bg-blue-50 border-blue-200'
+              }`}>
+                <strong className="text-blue-700 dark:text-blue-300 block uppercase tracking-wider text-[10px] mb-1">
+                  The Agreed Honest Answer on Benchmarking:
                 </strong>
-                <p className="text-[11px]">
+                <p className="text-xs">
                   "We benchmarked token reduction and conversational coherence across our test conversations, showing a ~60–80% context reduction without dropping relevant facts. We deliberately did not run formal relevance/accuracy benchmarks against full-transcript replay, which would require an offline evaluation pipeline that wasn't our priority for a 6-hour build."
                 </p>
               </div>
 
-              <div className="pt-1 text-right">
+              <div className="pt-2 text-right">
                 <button
                   type="button"
                   onClick={() => setShowHonestAnswer(false)}
-                  className="px-3 py-1 bg-[#1A1614] hover:bg-[#2E2420] text-[#FFF1D6] border border-[#2E2420] font-mono text-[10px] uppercase transition rounded-none"
+                  className={`px-3 py-1.5 border text-xs font-mono uppercase transition rounded-none ${
+                    isDark ? 'bg-[#2A2A2A] hover:bg-[#333] border-[#383838]' : 'bg-slate-100 hover:bg-slate-200 border-slate-300'
+                  }`}
                 >
                   Close
                 </button>

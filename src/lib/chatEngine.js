@@ -77,7 +77,7 @@ export async function generateChatReply({
 
     const messages = buildChatMessages(systemPrompt, top5Memories, userMessage);
 
-    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    let response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -91,6 +91,45 @@ export async function generateChatReply({
       }),
       signal: controller.signal
     });
+
+    // Automatic quota failover for Gemini: if model hits 429/404, failover to gemini-3.5-flash-lite
+    if ((response.status === 429 || response.status === 404) && baseUrl.includes('google') && model !== 'gemini-3.5-flash-lite') {
+      console.warn(`[ChatEngine] Model ${model} returned ${response.status}. Automatically retrying with gemini-3.5-flash-lite...`);
+      response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gemini-3.5-flash-lite',
+          messages,
+          temperature: 0.7,
+          max_tokens: 800
+        }),
+        signal: controller.signal
+      });
+    }
+
+    // Automatic failover for Groq: if model hits 404 or 429, failover to openai/gpt-oss-20b or openai/gpt-oss-120b
+    if ((response.status === 429 || response.status === 404) && baseUrl.includes('groq')) {
+      const fallbackGroqModel = model === 'openai/gpt-oss-120b' ? 'openai/gpt-oss-20b' : 'openai/gpt-oss-120b';
+      console.warn(`[ChatEngine] Groq model ${model} returned ${response.status}. Retrying with ${fallbackGroqModel}...`);
+      response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: fallbackGroqModel,
+          messages,
+          temperature: 0.7,
+          max_tokens: 800
+        }),
+        signal: controller.signal
+      });
+    }
 
     clearTimeout(timeoutId);
 

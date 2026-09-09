@@ -99,7 +99,7 @@ export async function extractAndStoreMemories({
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
 
-      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      let response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,6 +108,7 @@ export async function extractAndStoreMemories({
         body: JSON.stringify({
           model,
           temperature: 0.1,
+          response_format: { type: "json_object" },
           messages: [
             { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
             { role: 'user', content: userMessage }
@@ -115,6 +116,51 @@ export async function extractAndStoreMemories({
         }),
         signal: controller.signal
       });
+
+      // Automatic quota failover for Gemini
+      if ((response.status === 429 || response.status === 404) && baseUrl.includes('google') && model !== 'gemini-3.5-flash-lite') {
+        console.warn(`[Extraction] Model ${model} returned ${response.status}. Retrying with gemini-3.5-flash-lite...`);
+        response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gemini-3.5-flash-lite',
+            temperature: 0.1,
+            response_format: { type: "json_object" },
+            messages: [
+              { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+              { role: 'user', content: userMessage }
+            ]
+          }),
+          signal: controller.signal
+        });
+      }
+
+      // Automatic failover for Groq
+      if ((response.status === 429 || response.status === 404) && baseUrl.includes('groq')) {
+        const fallbackGroqModel = model === 'openai/gpt-oss-120b' ? 'openai/gpt-oss-20b' : 'openai/gpt-oss-120b';
+        console.warn(`[Extraction] Groq model ${model} returned ${response.status}. Retrying with ${fallbackGroqModel}...`);
+        response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: fallbackGroqModel,
+            temperature: 0.1,
+            response_format: { type: "json_object" },
+            messages: [
+              { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+              { role: 'user', content: userMessage }
+            ]
+          }),
+          signal: controller.signal
+        });
+      }
 
       clearTimeout(timeoutId);
 

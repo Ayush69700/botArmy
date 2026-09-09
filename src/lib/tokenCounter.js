@@ -1,20 +1,40 @@
 /**
  * Real Token Efficiency Computation Module
- * Computes authentic, non-fabricated BPE token counts for:
- * 1. Naive full-transcript replay context
- * 2. Actual minimal-context payload (system + top 5 + message)
- * Synchronized with Chromium's built-in IndexedDB for reload persistence.
+ * Dual-layer persistent (LocalStorage + Chromium IndexedDB).
  */
 
 import { encode } from 'gpt-tokenizer';
 import { getAllEfficiencyFromDB, putEfficiencyInDB } from './indexedDB.js';
 
+const STORAGE_KEY = 'ps4_companion_efficiency_v2';
+
 let efficiencyHistory = [];
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const cached = window.localStorage.getItem(STORAGE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        efficiencyHistory = parsed;
+      }
+    }
+  }
+} catch (e) {}
+
 let listeners = new Set();
 let isInitialized = false;
 
+function syncToLocalStorage(data) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+  } catch (e) {}
+}
+
 function notifyListeners() {
   const snapshot = [...efficiencyHistory];
+  syncToLocalStorage(snapshot);
   listeners.forEach((fn) => {
     try {
       fn(snapshot);
@@ -33,8 +53,10 @@ export async function initializeEfficiencyHistory() {
     const records = await getAllEfficiencyFromDB();
     if (records && records.length > 0) {
       records.sort((a, b) => a.turn - b.turn);
-      efficiencyHistory = records;
-      notifyListeners();
+      if (records.length > efficiencyHistory.length) {
+        efficiencyHistory = records;
+        notifyListeners();
+      }
     }
   } catch (e) {
     console.warn("[TokenCounter] IndexedDB init error:", e);
@@ -99,13 +121,6 @@ export function computeActualTokens(systemPrompt, top5Memories = [], currentMess
 
 /**
  * Records a turn's efficiency metrics.
- * @param {Object} params
- * @param {number} params.turn
- * @param {string} params.systemPrompt
- * @param {Array<Object>} params.fullHistory
- * @param {Array<Object|string>} params.top5Memories
- * @param {string} params.currentMessage
- * @returns {Object} Turn efficiency record
  */
 export function recordTurnEfficiency({
   turn,
@@ -151,26 +166,20 @@ export function recordTurnEfficiency({
   return record;
 }
 
-/**
- * Returns current efficiency history.
- */
 export function getEfficiencyHistory() {
   return [...efficiencyHistory];
 }
 
-/**
- * Resets efficiency metrics.
- */
 export function clearEfficiencyHistory() {
   efficiencyHistory = [];
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch (e) {}
   notifyListeners();
 }
 
-/**
- * Subscribe to efficiency updates.
- * @param {Function} listener
- * @returns {Function} Unsubscribe function
- */
 export function subscribeToEfficiency(listener) {
   listeners.add(listener);
   listener([...efficiencyHistory]);

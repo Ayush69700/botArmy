@@ -1,8 +1,7 @@
 /**
- * Memory Storage Layer (In-Memory Array + Chromium Native IndexedDB Persistence)
+ * Memory Storage Layer (Synchronous LocalStorage + Chromium IndexedDB)
  * Flat, tagged memory list adhering strictly to the spec.
- * Automatically synchronizes with Chromium's built-in IndexedDB so memories
- * persist across page reloads and browser restarts.
+ * Instant zero-latency hydration from LocalStorage + Chromium IndexedDB persistence.
  */
 
 import {
@@ -12,12 +11,40 @@ import {
   clearMemoriesFromDB
 } from './indexedDB.js';
 
+const STORAGE_KEY = 'ps4_companion_memories_v2';
+
+// 1. Synchronously initialize from localStorage to eliminate any async blank flash on reload
 let memoryStore = [];
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const cached = window.localStorage.getItem(STORAGE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        memoryStore = parsed;
+      }
+    }
+  }
+} catch (e) {
+  console.warn("[MemoryStore] LocalStorage read error:", e);
+}
+
 let listeners = new Set();
 let isInitialized = false;
 
+function syncToLocalStorage(data) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+  } catch (e) {
+    console.warn("[MemoryStore] LocalStorage write error:", e);
+  }
+}
+
 function notifyListeners() {
   const snapshot = [...memoryStore];
+  syncToLocalStorage(snapshot);
   listeners.forEach((listener) => {
     try {
       listener(snapshot);
@@ -28,25 +55,37 @@ function notifyListeners() {
 }
 
 /**
- * Loads memories from IndexedDB on startup.
+ * Loads memories from IndexedDB on startup and merges with localStorage.
  */
 export async function initializeMemoryStore() {
   if (isInitialized) return memoryStore;
   try {
     const dbMemories = await getAllMemoriesFromDB();
     if (dbMemories && dbMemories.length > 0) {
-      memoryStore = dbMemories;
-      notifyListeners();
+      // Merge unique memories by ID
+      const existingIds = new Set(memoryStore.map(m => m.id));
+      let added = false;
+      dbMemories.forEach(m => {
+        if (!existingIds.has(m.id)) {
+          memoryStore.push(m);
+          added = true;
+        }
+      });
+      if (added) {
+        notifyListeners();
+      }
+    } else if (memoryStore.length > 0) {
+      // Save existing localStorage memories into IndexedDB
+      putMemoriesInDB(memoryStore).catch(() => {});
     }
   } catch (e) {
-    console.warn("[MemoryStore] Could not load from IndexedDB, using memory array:", e);
+    console.warn("[MemoryStore] IndexedDB sync error:", e);
   } finally {
     isInitialized = true;
   }
   return memoryStore;
 }
 
-// Auto-trigger initialization in browser environments
 if (typeof window !== 'undefined') {
   initializeMemoryStore();
 }
@@ -59,7 +98,7 @@ export function getMemories() {
 }
 
 /**
- * Adds a single memory item to the in-memory array and IndexedDB.
+ * Adds a single memory item to memory, localStorage, and IndexedDB.
  * @param {Object} item - { type, content, tag, turn, source }
  * @returns {Object} Stored memory object with ID
  */
@@ -83,7 +122,7 @@ export function addMemory(item) {
   if (!exists) {
     memoryStore.push(memory);
     notifyListeners();
-    // Persist to Chromium IndexedDB
+    // Persist to IndexedDB
     putMemoryInDB(memory).catch(() => {});
   }
 
@@ -107,10 +146,15 @@ export function addMemories(items = []) {
 }
 
 /**
- * Resets or clears the memory store in RAM and IndexedDB.
+ * Resets or clears the memory store in RAM, localStorage, and IndexedDB.
  */
 export function clearMemories() {
   memoryStore = [];
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch (e) {}
   notifyListeners();
   clearMemoriesFromDB().catch(() => {});
 }
