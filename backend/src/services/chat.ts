@@ -2,6 +2,7 @@ import { db } from '../config/db.js';
 import { Message, Memory } from '../types/index.js';
 import { memoryService } from './memory.js';
 import { generateChatResponse, generateChatResponseStream } from './gemini.js';
+import { searchWeb, isGeneralKnowledgeQuery, SearchResult } from './websearch.js';
 
 export interface ChatMessageResult {
   userMessage: Message;
@@ -19,27 +20,37 @@ export const chatService = {
     // 1. Save user message
     const userMessage = await db.createMessage(conversation.id, 'user', content);
 
-    // 2. Retrieve relevant memories (cheap prompt)
+    // 2. Retrieve relevant memories (cheap prompt / keyword matching)
     const { memoryIds, memories: usedMemories } = await memoryService.retrieveRelevantMemories(
       userId,
       content
     );
 
-    // 3. Fetch recent history (last 15 messages, ordered chronologically for Gemini)
+    // 3. Search the web if it's a general knowledge or factual question
+    let webResults: SearchResult[] = [];
+    if (isGeneralKnowledgeQuery(content)) {
+      try {
+        webResults = await searchWeb(content);
+      } catch {
+        webResults = [];
+      }
+    }
+
+    // 4. Fetch recent history (last 15 messages, ordered chronologically for Gemini)
     const recentMessages = await db.getMessages(conversation.id, 15);
-    // Exclude the message we just inserted so it isn't duplicated in history
     const historyBeforeCurrent = recentMessages
       .filter((m) => m.id !== userMessage.id)
       .reverse();
 
-    // 4. Generate assistant response
+    // 5. Generate assistant response with live web search & memories
     const assistantReplyText = await generateChatResponse(
       content,
       usedMemories,
-      historyBeforeCurrent
+      historyBeforeCurrent,
+      webResults
     );
 
-    // 5. Save assistant message with used_memory_ids
+    // 6. Save assistant message with used_memory_ids
     const assistantMessage = await db.createMessage(
       conversation.id,
       'assistant',
@@ -47,7 +58,7 @@ export const chatService = {
       memoryIds.length > 0 ? memoryIds : null
     );
 
-    // 6. Asynchronously extract new memories (non-blocking!)
+    // 7. Asynchronously extract new memories (non-blocking!)
     setImmediate(() => {
       memoryService.processAndStoreNewMemories(
         userId,
@@ -94,24 +105,35 @@ export const chatService = {
       content
     );
 
-    // 3. Fetch recent history
+    // 3. Search the web if needed
+    let webResults: SearchResult[] = [];
+    if (isGeneralKnowledgeQuery(content)) {
+      try {
+        webResults = await searchWeb(content);
+      } catch {
+        webResults = [];
+      }
+    }
+
+    // 4. Fetch recent history
     const recentMessages = await db.getMessages(conversation.id, 15);
     const historyBeforeCurrent = recentMessages
       .filter((m) => m.id !== userMessage.id)
       .reverse();
 
-    // 4. Stream response
+    // 5. Stream response
     let fullResponseText = '';
     for await (const chunk of generateChatResponseStream(
       content,
       usedMemories,
-      historyBeforeCurrent
+      historyBeforeCurrent,
+      webResults
     )) {
       fullResponseText += chunk;
       yield { type: 'chunk', text: chunk };
     }
 
-    // 5. Save assistant message
+    // 6. Save assistant message
     const assistantMessage = await db.createMessage(
       conversation.id,
       'assistant',
@@ -119,7 +141,7 @@ export const chatService = {
       memoryIds.length > 0 ? memoryIds : null
     );
 
-    // 6. Async memory extraction
+    // 7. Async memory extraction
     setImmediate(() => {
       memoryService.processAndStoreNewMemories(
         userId,

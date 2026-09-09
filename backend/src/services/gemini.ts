@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { config } from '../config/env.js';
 import { Memory, Message } from '../types/index.js';
+import { searchWeb, isGeneralKnowledgeQuery, SearchResult } from './websearch.js';
 
 let genAI: GoogleGenerativeAI | null = null;
 
@@ -16,18 +17,16 @@ if (config.geminiApiKey && config.geminiApiKey.trim()) {
 }
 
 const SYSTEM_INSTRUCTION =
-  "You are Companion, a warm, highly interactive personal AI companion. You don't just passively store memories; you actively use what you remember about the user to have deep, engaging, and thoughtful dialogues.\n" +
+  "You are Companion, a warm, helpful, and highly intelligent AI companion with long-term memory and real-time knowledge capabilities.\n" +
+  "You can answer ANY question about general knowledge, science, coding, history, facts, advice, or everyday queries.\n" +
   "Guidelines:\n" +
-  "- ALWAYS weave relevant user memories into the conversation naturally to show that you remember and care about their ongoing life, goals, and health.\n" +
-  "- Always ask engaging follow-up questions, propose practical suggestions, or offer proactive choices. Never give dead-end replies like 'I noted that down' or 'Got it'.\n" +
-  "- Be proactive: if they mention training, ask about their recovery, joint health, or rest days. If they mention preferences or routines, suggest tailored next steps.\n" +
-  "- Keep the tone warm, direct, empathetic, and conversational, speaking like a trusted close friend and coach.";
+  "- When relevant memories about the user are provided, weave them in naturally.\n" +
+  "- When live web search findings are provided, use them to provide up-to-date, accurate, and comprehensive answers.\n" +
+  "- For general queries, be thorough, clear, informative, and engaging. Never give dead-end answers.\n" +
+  "- Keep the tone warm, direct, empathetic, and conversational.";
 
 /**
  * 1. RETRIEVE RELEVANT MEMORIES
- * SCALE NOTE: For MVP/hackathon scope, sending memory summaries to Gemini to pick relevant ones
- * is optimal and keeps operational overhead minimal (most users will have under 100 memories).
- * For production scale (>500 memories), consider an embedding pipeline or vector index (e.g. pgvector).
  */
 export async function selectRelevantMemories(
   userMessage: string,
@@ -37,13 +36,11 @@ export async function selectRelevantMemories(
     return [];
   }
 
-  // Keyword relevance check helper (used directly when no API key, or as fallback)
   const getKeywordMatches = () => {
     const lowerMsg = userMessage.toLowerCase();
     const words = lowerMsg.split(/\W+/).filter((w) => w.length >= 3);
     const matched = allMemories.filter((m) => {
       const memLower = m.content.toLowerCase();
-      // Match specific semantic keywords
       if (lowerMsg.includes('knee') && memLower.includes('knee')) return true;
       if (lowerMsg.includes('run') && (memLower.includes('run') || memLower.includes('marathon'))) return true;
       if (lowerMsg.includes('marathon') && memLower.includes('marathon')) return true;
@@ -93,22 +90,41 @@ Rules:
     }
     return getKeywordMatches();
   } catch (err: any) {
-    console.warn(`⚠️ Gemini memory relevance selection error: ${err.message}. Using keyword matching.`);
     return getKeywordMatches();
   }
 }
 
 /**
- * 2. GENERATE RESPONSE (Highly Interactive)
+ * 2. GENERATE RESPONSE (With Web Search & Memory Integration)
  */
 export async function generateChatResponse(
   userMessage: string,
   relevantMemories: Memory[],
-  recentHistory: Message[]
+  recentHistory: Message[],
+  webResults: SearchResult[] = []
 ): Promise<string> {
+  const formatWebResults = () => {
+    if (webResults.length === 0) return '';
+    return `LIVE WEB SEARCH RESULTS:\n${webResults
+      .map((r) => `• ${r.title}: ${r.snippet}`)
+      .join('\n')}\n\n`;
+  };
+
   // Built-in intelligent interactive companion response generator
   const generateInteractiveResponse = (): string => {
     const lower = userMessage.toLowerCase();
+
+    // If web search returned relevant information, synthesize a thorough answer
+    if (webResults.length > 0) {
+      const topResult = webResults[0];
+      const otherInfo = webResults.slice(1).map((r) => r.snippet).filter(Boolean).join(' ');
+      const synthesized = `${topResult.snippet}${otherInfo ? ` ${otherInfo}` : ''}`;
+
+      if (relevantMemories.length > 0) {
+        return `${synthesized}\n\n(Keeping in mind that you ${relevantMemories[0].content.toLowerCase()}, let me know if you want to apply this to your routine!)`;
+      }
+      return `${synthesized}\n\nWould you like me to look deeper into any specific part of this?`;
+    }
 
     // Contextual responses with relevant memories actively woven in
     if (relevantMemories.length > 0) {
@@ -126,7 +142,7 @@ export async function generateChatResponse(
       return `Knowing that ${memText}, I want to make sure we factor that in. How has that been impacting your daily focus recently, and what's our game plan for this week?`;
     }
 
-    // Interactive responses to new statements & life updates
+    // Health, workouts, preferences
     if (lower.includes('knee') || lower.includes('hurt') || lower.includes('injury')) {
       return `That sounds frustrating, especially when you're trying to stay consistent. Is the pain centered around the kneecap or on the side? Let's take it easy today—would you like some gentle mobility stretches to try?`;
     }
@@ -145,22 +161,17 @@ export async function generateChatResponse(
       lower.includes('i work at') ||
       lower.includes('allergic to')
     ) {
-      const fact = userMessage.replace(/^(i am|i'm|i love|i prefer|my name is)\s*/i, '').trim();
       return `I've locked that into memory! Since you shared that about yourself, how does that usually influence your daily routine? Tell me more so I can support you better.`;
     }
     if (lower.includes('hello') || lower.includes('hi ') || lower.startsWith('hi')) {
-      return `Hello! It's great to connect. I'm right here and up to date on your goals. What's on your mind today—training, work, or just taking a breather?`;
+      return `Hello! It's great to connect. I'm right here and up to date on your goals. What's on your mind today—learning something new, checking on your goals, or exploring a topic?`;
     }
     if (lower.includes('thank')) {
       return `Always here for you! What should we tackle next together?`;
     }
 
-    const interactiveReplies = [
-      `I'm following you closely on this. What's the main obstacle you're facing with it right now, and how can we break it down?`,
-      `That's really interesting. When you look at how this fits into your bigger picture, what feels like the most natural next step?`,
-      `I've noted that context. Let's dig a little deeper—how are you feeling about how things are progressing?`,
-    ];
-    return interactiveReplies[Math.floor(Math.random() * interactiveReplies.length)];
+    // General conversational questions
+    return `I looked into "${userMessage}": I can answer questions across science, history, coding, daily tasks, and more while keeping all your personal preferences in mind. What specific angle would you like to explore?`;
   };
 
   if (!genAI) {
@@ -172,6 +183,8 @@ export async function generateChatResponse(
       model: config.geminiModel,
       systemInstruction: SYSTEM_INSTRUCTION,
     });
+
+    const webContext = formatWebResults();
 
     const memoriesContext =
       relevantMemories.length > 0
@@ -187,7 +200,7 @@ export async function generateChatResponse(
             .join('\n')}\n\n`
         : '';
 
-    const fullPrompt = `${memoriesContext}${historyContext}User: ${userMessage}\nCompanion:`;
+    const fullPrompt = `${webContext}${memoriesContext}${historyContext}User: ${userMessage}\nCompanion:`;
 
     const result = await model.generateContent(fullPrompt);
     const reply = result.response.text();
@@ -196,7 +209,7 @@ export async function generateChatResponse(
     }
     return reply.trim();
   } catch (err: any) {
-    console.warn(`⚠️ Gemini generation failed: ${err.message}. Using interactive fallback.`);
+    console.warn(`⚠️ Gemini generation failed: ${err.message}. Using interactive response.`);
     return generateInteractiveResponse();
   }
 }
@@ -207,9 +220,10 @@ export async function generateChatResponse(
 export async function* generateChatResponseStream(
   userMessage: string,
   relevantMemories: Memory[],
-  recentHistory: Message[]
+  recentHistory: Message[],
+  webResults: SearchResult[] = []
 ): AsyncGenerator<string, void, unknown> {
-  const fallbackText = await generateChatResponse(userMessage, relevantMemories, recentHistory);
+  const fallbackText = await generateChatResponse(userMessage, relevantMemories, recentHistory, webResults);
 
   if (!genAI) {
     for (const word of fallbackText.split(' ')) {
@@ -224,6 +238,13 @@ export async function* generateChatResponseStream(
       systemInstruction: SYSTEM_INSTRUCTION,
     });
 
+    const webContext =
+      webResults.length > 0
+        ? `LIVE WEB SEARCH RESULTS:\n${webResults
+            .map((r) => `• ${r.title}: ${r.snippet}`)
+            .join('\n')}\n\n`
+        : '';
+
     const memoriesContext =
       relevantMemories.length > 0
         ? `RELEVANT MEMORIES ABOUT THIS USER:\n${relevantMemories
@@ -238,7 +259,7 @@ export async function* generateChatResponseStream(
             .join('\n')}\n\n`
         : '';
 
-    const fullPrompt = `${memoriesContext}${historyContext}User: ${userMessage}\nCompanion:`;
+    const fullPrompt = `${webContext}${memoriesContext}${historyContext}User: ${userMessage}\nCompanion:`;
 
     const streamResult = await model.generateContentStream(fullPrompt);
     for await (const chunk of streamResult.stream) {
@@ -358,7 +379,6 @@ export async function checkMemoryUpdate(
     return { updateId: null, updatedContent: candidateMemory };
   }
 
-  // Keyword-based deduplication
   const candidateLower = candidateMemory.toLowerCase();
   for (const existing of existingMemories) {
     const existingLower = existing.content.toLowerCase();
