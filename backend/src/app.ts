@@ -14,9 +14,27 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Health Check
+// Health & API Status
 app.get(['/health', '/api/health'], (_req, res) => {
   res.status(200).json({ status: 'ok', service: 'companion-backend' });
+});
+
+app.get('/api', (_req, res) => {
+  res.status(200).json({
+    service: 'Companion AI Backend API',
+    status: 'online',
+    endpoints: {
+      health: '/api/health',
+      memories: '/api/memories',
+      chatHistory: '/api/chat/history',
+      chatMessage: 'POST /api/chat/message',
+      authSignup: 'POST /api/auth/signup',
+      authLogin: 'POST /api/auth/login',
+      wsChatStream: 'ws://localhost:3001/api/chat/stream',
+      wsVoiceStream: 'ws://localhost:3001/api/voice/stream',
+    },
+    note: 'Direct browser GET requests now automatically authenticate as the default local session.',
+  });
 });
 
 // API Routes
