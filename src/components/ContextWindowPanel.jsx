@@ -12,7 +12,8 @@ import {
   UserCheck,
   CheckCircle2,
   ArrowUpRight,
-  Eye
+  Eye,
+  PanelRightClose
 } from 'lucide-react';
 import fallbackMemoriesSeed from '../../fixtures/fallbackMemories.json' with { type: 'json' };
 import { addMemories, clearMemories, getMemories } from '../lib/memoryStore.js';
@@ -24,7 +25,8 @@ export default function ContextWindowPanel({
   lastExtracted = null,
   latestUsedMemories = [],
   onManualRefresh,
-  isDark = true
+  isDark = true,
+  onToggleMinimize
 }) {
   const [activeTab, setActiveTab] = useState('window'); // 'window' | 'memories' | 'efficiency'
   const [activeFilter, setActiveFilter] = useState('all');
@@ -114,13 +116,30 @@ export default function ContextWindowPanel({
           </div>
         </div>
 
-        {/* Global Savings Tag */}
-        {latest && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 text-xs font-mono font-semibold">
-            <TrendingDown className="w-3.5 h-3.5" />
-            <span>{overallPercentSaved}% context cut</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Global Savings Tag */}
+          {latest && (
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 text-xs font-mono font-semibold">
+              <TrendingDown className="w-3.5 h-3.5" />
+              <span>{overallPercentSaved}% cut</span>
+            </div>
+          )}
+
+          {onToggleMinimize && (
+            <button
+              type="button"
+              onClick={onToggleMinimize}
+              title="Minimize Context Window Panel"
+              className={`p-1.5 border transition rounded-none ${
+                isDark
+                  ? 'bg-[#2A2A2A] hover:bg-[#333] text-slate-300 border-[#383838]'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+              }`}
+            >
+              <PanelRightClose className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Segmented View Tabs */}
